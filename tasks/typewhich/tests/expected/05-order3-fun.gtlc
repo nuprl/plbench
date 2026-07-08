@@ -1,0 +1,3 @@
+let app : (('a -> 'a) -> 'a) -> ('a -> 'a) -> 'a =
+  fun f:any. fun x:any. x (f x) in
+app

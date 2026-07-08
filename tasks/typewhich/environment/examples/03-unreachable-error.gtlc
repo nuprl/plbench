@@ -1,0 +1,5 @@
+let omega = fun x. x x in
+let branch = fun c. (omega 5) 5 in
+let zero = fun d. 0 in
+let choose = fun t. fun f. f in
+(fun b. b branch zero) choose

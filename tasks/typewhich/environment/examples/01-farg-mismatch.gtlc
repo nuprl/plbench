@@ -1,0 +1,2 @@
+let add100 = fun x. x + 100 in
+(fun f. f true) add100

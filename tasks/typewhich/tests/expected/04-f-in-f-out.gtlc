@@ -1,0 +1,2 @@
+let add10 : int -> int = fun x:int. 10 + x in
+(fun f:int -> int. (fun y:int. f) (f 5)) add10

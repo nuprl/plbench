@@ -1,0 +1,3 @@
+let h : ((int -> int) -> int -> any) -> (int -> int) -> any =
+  fun f:any. fun g:any. (f g) ((g 10) + 1) in
+h

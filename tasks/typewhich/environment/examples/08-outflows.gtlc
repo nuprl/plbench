@@ -1,0 +1,2 @@
+let weird = fun x. x 5 + x in
+weird 5

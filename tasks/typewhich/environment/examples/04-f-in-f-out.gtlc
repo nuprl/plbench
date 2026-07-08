@@ -1,0 +1,2 @@
+let add10 = fun x. 10 + x in
+(fun f. (fun y. f) (f 5)) add10

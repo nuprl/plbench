@@ -1,0 +1,2 @@
+let add100 : any -> int = fun x:any. x + 100 in
+(fun f:any -> int. f true) add100

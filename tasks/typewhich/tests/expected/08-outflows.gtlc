@@ -1,0 +1,2 @@
+let weird : int -> int = fun x:int. (x : any) 5 + x in
+weird 5

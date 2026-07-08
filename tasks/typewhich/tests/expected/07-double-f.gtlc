@@ -1,0 +1,2 @@
+let twice : (bool -> bool) -> bool = fun f:bool. f (f true) in
+twice

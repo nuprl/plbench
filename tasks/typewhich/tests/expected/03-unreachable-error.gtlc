@@ -1,0 +1,5 @@
+let omega : any -> any = fun x:any. x x in
+let branch : any -> any = fun c:any. (omega 5) 5 in
+let zero : any -> int = fun d:any. 0 in
+let choose : any -> any -> any = fun t:any. fun f:any. f in
+(fun b:any. b branch zero) choose

@@ -1,0 +1,2 @@
+let const5 = fun x. 5 in
+(fun f. f true + (fun g. g 5) f) const5

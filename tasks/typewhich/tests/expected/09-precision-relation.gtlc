@@ -1,0 +1,2 @@
+let const5 : 'a -> int = fun x:any. 5 in
+(fun f:any -> int. f true + (fun g:any -> int. g 5) f) const5

@@ -1,0 +1,2 @@
+let id = fun x. x in
+(fun a. id true) (id 5)

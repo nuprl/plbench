@@ -1,0 +1,2 @@
+let id : 'a -> 'a = fun x:any. x in
+(fun a:any. id true) (id 5)

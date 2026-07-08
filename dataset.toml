@@ -3,11 +3,12 @@
 
 [dataset]
 name = "nuprl/plbench"
-description = "ILVM interpreter and self-hosting compiler tasks"
+description = "Programming-language implementation and type-system tasks"
 authors = []
-keywords = ["programming-languages", "ilvm"]
+keywords = ["programming-languages", "ilvm", "typewhich"]
 
 tasks = [
   { path = "tasks/ilvm-interpreter" },
   { path = "tasks/ilvm-self-hosting-compiler" },
+  { path = "tasks/typewhich" },
 ]
