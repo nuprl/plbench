@@ -1,0 +1,576 @@
+extern crate clap;
+extern crate nom;
+
+mod error;
+mod eval;
+mod parser;
+mod syntax;
+mod tc;
+
+use clap::{App, AppSettings, Arg};
+use error::*;
+use std::fs::File;
+use std::io::prelude::*;
+use std::process;
+
+fn parse_and_eval(
+    code: &str,
+    mem_limit: usize,
+    reg_limit: usize,
+    cli_args: &[String],
+) -> Result<i32, Error> {
+    let blocks = try!(parser::parse(code));
+    let blocks = try!(tc::tc(blocks));
+    return eval::eval(mem_limit, reg_limit, blocks, cli_args);
+}
+
+fn parse_cli_args<'a, I>(args: I) -> Result<Vec<String>, Error>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut parsed_args = Vec::new();
+    let mut iter = args.into_iter();
+
+    while let Some(kind) = iter.next() {
+        let value = iter.next().ok_or(Error::Usage(format!(
+            "expected value after ILVM argument marker {}",
+            kind
+        )))?;
+
+        match kind {
+            "-l" => parsed_args.push(value.to_string()),
+            "-f" => {
+                let mut file = try!(File::open(value));
+                let mut buf = String::new();
+                try!(file.read_to_string(&mut buf));
+                parsed_args.push(buf);
+            }
+            _ => {
+                return Err(Error::Usage(format!(
+                    "expected -l or -f in ILVM arguments, found {}",
+                    kind
+                )))
+            }
+        }
+    }
+
+    Ok(parsed_args)
+}
+
+fn main_result() -> Result<i32, Error> {
+    let args = App::new("ILVM")
+        .version(env!("CARGO_PKG_VERSION"))
+        .setting(AppSettings::AllowLeadingHyphen)
+        .setting(AppSettings::TrailingVarArg)
+        .arg(
+            Arg::with_name("memlimit")
+                .short("m")
+                .long("memory-limit")
+                .value_name("MEM_LIMIT")
+                .default_value("16777216")
+                .help("Sets a memory limit in words")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("INPUT")
+                .value_name("FILENAME")
+                .help("Sets the input file to use")
+                .required(true)
+                .index(1),
+        )
+        .arg(
+            Arg::with_name("reglimit")
+                .short("r")
+                .value_name("REG_LIMIT")
+                .default_value("64")
+                .long("num-registers")
+                .help("Set the number of registers"),
+        )
+        .arg(
+            Arg::with_name("ARGS")
+                .value_name("ARGS")
+                .help("Ordered ILVM arguments: -l literal or -f filename")
+                .multiple(true)
+                .allow_hyphen_values(true)
+                .index(2),
+        )
+        .get_matches();
+    let path = args.value_of("INPUT").unwrap();
+    let mut file = try!(File::open(&path));
+    let mut buf = String::new();
+    try!(file.read_to_string(&mut buf));
+    let ilvm_args = match args.values_of("ARGS") {
+        Some(values) => parse_cli_args(values)?,
+        None => Vec::new(),
+    };
+    parse_and_eval(
+        &buf[..],
+        args.value_of("memlimit").unwrap().parse::<usize>().unwrap(),
+        args.value_of("reglimit").unwrap().parse::<usize>().unwrap(),
+        &ilvm_args,
+    )
+}
+
+fn main() {
+    match main_result() {
+        Ok(r) => println!("Normal termination. Result = {}", r),
+        Err(err) => {
+            println!("An error occurred.\n{}", err);
+            process::exit(1)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::syntax::{Instr, Printable, Val};
+    use std::fs::{remove_file, File};
+    use std::io::Write;
+
+    fn parse_and_eval(code: &str) -> Result<i32, super::error::Error> {
+        super::parse_and_eval(code, 500, 10, &[])
+    }
+
+    fn parse_and_eval_with_args(
+        code: &str,
+        args: &[String],
+    ) -> Result<i32, super::error::Error> {
+        super::parse_and_eval(code, 500, 10, args)
+    }
+
+    fn assert_code_eq_block(code: &str, expected_block: Instr) {
+        match super::parser::parse(code) {
+            Result::Ok(blocks) => match super::tc::tc(blocks) {
+                Result::Ok(blocks) => match blocks.get(&0) {
+                    Option::Some(block) => assert_eq!(*block, expected_block),
+                    _ => assert!(false, "no zero block found in"),
+                },
+                _ => assert!(false, "tc returned Error"),
+            },
+            Result::Err(super::Error::Parse(s)) => {
+                assert!(false, format!("parse error, {}", s))
+            }
+            _ => assert!(
+                false,
+                format!("parse returned Error on input, {}", code)
+            ),
+        };
+    }
+
+    #[test]
+    fn test_parse_cli_args_literals_and_files() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("ilvm-test-{}.txt", std::process::id()));
+
+        {
+            let mut file = File::create(&path).unwrap();
+            file.write_all(b"file contents").unwrap();
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        let args = vec!["-l", "arg1", "-f", &path_str, "-l", "arg2"];
+        let parsed = super::parse_cli_args(args).unwrap();
+        remove_file(&path).unwrap();
+
+        assert_eq!(
+            parsed,
+            vec![
+                "arg1".to_string(),
+                "file contents".to_string(),
+                "arg2".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_cli_args_rejects_unknown_marker() {
+        match super::parse_cli_args(vec!["-x", "arg"]) {
+            Err(super::Error::Usage(msg)) => assert!(msg.contains("-l or -f")),
+            _ => panic!("Expected Usage error"),
+        }
+    }
+
+    #[test]
+    fn test_parse_cli_args_rejects_missing_value() {
+        match super::parse_cli_args(vec!["-l"]) {
+            Err(super::Error::Usage(msg)) => {
+                assert!(msg.contains("expected value"))
+            }
+            _ => panic!("Expected Usage error"),
+        }
+    }
+
+    #[test]
+    fn test_trailing_whitespace() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                exit(200);
+            }  "#,
+        )
+        .unwrap();
+        assert!(r == 200);
+    }
+
+    #[test]
+    fn test_trailing_garbage() {
+        let r = super::parser::parse(
+            r#"
+            block 0 {
+                exit(200);
+            }  xxx"#,
+        );
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_print_parsing() {
+        let code = r#"
+            block 0 {
+                print(r0);
+                exit(200);
+            }"#;
+        let expected_block = Instr::Print(
+            Printable::Val(Val::Reg(0)),
+            Box::new(Instr::Exit(Val::Imm(200))),
+        );
+        assert_code_eq_block(code, expected_block);
+    }
+
+    #[test]
+    fn test_print_array_parsing() {
+        let code = r#"
+            block 0 {
+                print(array(r0, 6));
+                exit(200);
+            }"#;
+        let expected_block = Instr::Print(
+            Printable::Array(Val::Reg(0), Val::Imm(6)),
+            Box::new(Instr::Exit(Val::Imm(200))),
+        );
+        assert_code_eq_block(code, expected_block);
+    }
+
+    #[test]
+    fn test_exit() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                exit(200);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 200);
+    }
+
+    #[test]
+    fn test_reg_copy() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = 200;
+                r2 = r0;
+                exit(r2);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 200);
+    }
+
+    #[test]
+    fn test_reg_add() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = 200;
+                r1 = 11;
+                r3 = r0 + r1;
+                exit(r3);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 211);
+    }
+
+    #[test]
+    fn test_load_store() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = 200;
+                *r0 = 42;
+                r1 = *r0;
+                exit(r1);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 42);
+    }
+
+    #[test]
+    fn test_goto() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r2 = 200;
+                goto(10);
+            }
+            block 10 {
+                r2 = r2 + 1;
+                exit(r2);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 201);
+    }
+
+    #[test]
+    fn test_indirect_goto() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r2 = 200;
+                r3 = 10;
+                goto(r3);
+            }
+            block 10 {
+                r2 = r2 + r3;
+                exit(r2);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 210);
+    }
+
+    #[test]
+    fn test_ifz() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r2 = 1;
+                ifz r2 {
+                    exit(20);
+                }
+                else {
+                    exit(30);
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 30);
+    }
+
+    #[test]
+    fn test_fac() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r2 = 1;
+                r1 = 5;
+                goto(1);
+            }
+            block 1 {
+                ifz r1 {
+                   exit(r2);
+                }
+                else {
+                    r2 = r2 * r1;
+                    r1 = r1 - 1;
+                    goto(1);
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 120);
+    }
+
+    #[test]
+    fn test_malloc() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = malloc(10);
+                exit(r0);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 2);
+    }
+
+    #[test]
+    fn test_cli_arg_layout_no_args() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r1 = *1;
+                r2 = r0 + r1;
+                exit(r2);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 2);
+    }
+
+    #[test]
+    fn test_cli_arg_layout_with_args() {
+        let args = vec!["hi".to_string()];
+        let r = parse_and_eval_with_args(
+            r#"
+            block 0 {
+                r1 = *1;
+                r2 = *2;
+                r3 = *r2;
+                r6 = r1 + r2;
+                r6 = r6 + r3;
+                r6 = r6 + r0;
+                exit(r6);
+            }"#,
+            &args,
+        )
+        .unwrap();
+        assert!(r == 1751711752);
+    }
+
+    #[test]
+    fn test_malloc_starts_after_cli_args() {
+        let args = vec!["abc".to_string(), "defg".to_string()];
+        let r = parse_and_eval_with_args(
+            r#"
+            block 0 {
+                r1 = malloc(1);
+                exit(r1);
+            }"#,
+            &args,
+        )
+        .unwrap();
+        assert!(r == 7);
+    }
+
+    #[test]
+    fn test_print_str() {
+        let args = vec!["hello".to_string()];
+        let r = parse_and_eval_with_args(
+            r#"
+            block 0 {
+                r1 = *2;
+                print_str(r1);
+                exit(0);
+            }"#,
+            &args,
+        )
+        .unwrap();
+        assert!(r == 0);
+    }
+
+    #[test]
+    fn test_bitwise_ops() {
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = 12 & 10;
+                r1 = 12 | 10;
+                r2 = r0 ^ r1;
+                r3 = ~ r2;
+                r4 = -8 >> 1;
+                r5 = -8 >>> 1;
+                r6 = 3 << 4;
+                r7 = r3 + r4;
+                r7 = r7 + r6;
+                r8 = r5 == 2147483644;
+                r7 = r7 + r8;
+                exit(r7);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == 38);
+    }
+
+    #[test]
+    fn test_negative_immediates() {
+        // Test parsing negative integers (GitHub issue #3)
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = -7;
+                exit(r0);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == -7);
+    }
+
+    #[test]
+    fn test_negative_arithmetic() {
+        // Test that negative integers work with arithmetic operations
+        let r = parse_and_eval(
+            r#"
+            block 0 {
+                r0 = -7;
+                r1 = r0 - 5;
+                exit(r1);
+            }"#,
+        )
+        .unwrap();
+        assert!(r == -12);
+    }
+
+    #[test]
+    fn test_memsize() {
+        let r = super::parse_and_eval(
+            r#"
+            block 0 {
+                r0 = memsize;
+                exit(r0);
+            }"#,
+            500,
+            10,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(r, 500);
+    }
+
+    #[test]
+    fn test_line_comments() {
+        let r = super::parse_and_eval(
+            r#"
+            block 0 {
+                r0 = 10; // set r0
+                // full line comment
+                exit(r0);
+            }"#,
+            500,
+            10,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(r, 10);
+    }
+
+    #[test]
+    fn test_malloc_oom() {
+        // Test that malloc correctly fails when out of memory (GitHub issue #6)
+        // This program allocates memory in a loop without freeing, which should
+        // eventually fail with OOM instead of corrupting the free list
+        // Use a small memory limit (20 words) so it fails quickly
+        let r = super::parse_and_eval(
+            r#"
+            block 0 {
+                r0 = malloc(1);
+                *r0 = 1234;
+                goto(0);
+            }"#,
+            20, // small memory limit
+            10, // num registers
+            &[],
+        );
+        assert!(r.is_err());
+        match r {
+            Err(super::Error::Runtime(msg)) => {
+                assert!(msg.contains("OOM") || msg.contains("malloc"))
+            }
+            _ => panic!("Expected Runtime error with OOM message"),
+        }
+    }
+}

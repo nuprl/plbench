@@ -1,0 +1,23 @@
+# Git
+.git/
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Harbor local install / jobs
+.harbor-src/
+.harbor-venv/
+jobs/
+dist.tar.gz
+
+# Secrets
+.env

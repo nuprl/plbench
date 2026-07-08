@@ -1,0 +1,13 @@
+# Dataset manifest for nuprl/plbench
+# Local Harbor dataset of ILVM programming-language tasks.
+
+[dataset]
+name = "nuprl/plbench"
+description = "ILVM interpreter and self-hosting compiler tasks"
+authors = []
+keywords = ["programming-languages", "ilvm"]
+
+tasks = [
+  { path = "tasks/ilvm-interpreter" },
+  { path = "tasks/ilvm-self-hosting-compiler" },
+]
