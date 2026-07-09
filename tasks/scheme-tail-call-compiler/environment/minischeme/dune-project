@@ -1,0 +1,11 @@
+(lang dune 3.7)
+
+(using menhir 2.1)
+
+(name minischeme)
+
+(generate_opam_files false)
+
+(package
+ (name minischeme)
+ (synopsis "MiniScheme host interpreter"))

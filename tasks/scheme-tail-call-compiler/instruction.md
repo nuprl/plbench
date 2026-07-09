@@ -1,0 +1,68 @@
+Your task is to write a source-to-source compiler that restores proper tail
+calls for a small, Scheme-like language.
+
+## What Is Provided
+
+The MiniScheme language is documented in `/app/Language.md`, there is a
+reference interpreter in OCaml in `/app/minischeme-src`, and this interpreter
+is compiled and ready to run at `/app/minischeme`.
+
+You can provide an expression on the command line:
+
+```bash
+/app/minischeme -e '(display (+ 1 2))'
+```
+
+You can load one or more files:
+
+```bash
+/app/minischeme -l program.scm
+```
+
+The reference interpreter normally implements proper tail calls. It also has
+an optional stack-depth limit:
+
+```bash
+/app/minischeme --max-stack-depth 50 -l program.scm
+```
+
+When `--max-stack-depth N` is present, nested evaluation, including calls in
+tail position, is limited to depth `N`. Evaluation fails if it exceeds the
+limit. If the option is omitted, stack-depth counting is disabled and proper
+tail calls are retained. The exact language and interpreter behavior are
+specified in `/app/Language.md`.
+
+Python, OCaml, and Rust are installed in the environment. You may implement
+your compiler in any language.
+
+## What You Must Build
+
+Write an executable MiniScheme-to-MiniScheme compiler with exactly this
+command-line interface:
+
+```bash
+/app/compiler INPUT.scm OUTPUT.scm
+```
+
+`INPUT.scm` is a complete, valid MiniScheme program. On success, your compiler
+must write a complete MiniScheme program to `OUTPUT.scm` and exit with status
+0. If compilation fails, it must exit nonzero. The output program must have
+the same observable behavior as the input program: the same bytes on standard
+output, the same evaluation order and effects, and the same successful result
+or runtime failure.
+
+Most importantly, tail-recursive source programs must continue to work when
+the compiled output runs with a stack limit of 50, even when the corresponding
+uncompiled program would exceed that limit:
+
+```bash
+/app/compiler INPUT.scm OUTPUT.scm
+/app/minischeme --max-stack-depth 50 -l OUTPUT.scm
+```
+
+We will first run every source program on `/app/minischeme` without a stack
+limit as a semantics sanity check. We will then compile it using the interface
+above, run the compiled program with `--max-stack-depth 50`, and compare the
+behaviors. Tests include long direct tail recursion, mutual recursion such as
+`even?`/`odd?` on inputs greater than 100, tail calls through higher-order
+functions, and ordinary non-recursive language features.

@@ -1,0 +1,12 @@
+# Git
+.git/
+
+# OS
+.DS_Store
+
+# Build products
+__pycache__/
+*.pyc
+_build/
+*.install
+dist.tar.gz

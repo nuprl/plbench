@@ -12,4 +12,5 @@ tasks = [
   { path = "tasks/ilvm-self-hosting-compiler" },
   { path = "tasks/typewhich" },
   { path = "tasks/scheme-typeinf" },
+  { path = "tasks/scheme-tail-call-compiler" },
 ]
