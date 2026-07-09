@@ -45,8 +45,9 @@ value is truthy.
 
 Self-evaluating expressions are integers, floats, booleans, and strings.
 
-A symbol expression looks up the symbol in the current lexical environment.
-Unbound variables are runtime type errors.
+A symbol expression looks up the symbol in the current lexical environment. In
+command-line programs, unbound variables are rejected by the pre-evaluation
+closedness check.
 
 A non-empty list expression is either a special form or an application. For an
 application, the operator and all operands are evaluated left-to-right, then
@@ -139,17 +140,30 @@ Strings and symbols:
 Other:
 
 - `apply`: applies a procedure to a list of arguments
+- `display`: writes one value to stdout and returns `#f`; strings are written
+  without surrounding quotes or escape re-encoding, and other values use the
+  interpreter's printed representation
 - `error`: raises a runtime error with a string message
+
+## Pre-Evaluation Checks
+
+After reading source text and before evaluation, the interpreter checks that
+special forms are well-formed and that the combined program is closed. For the
+command-line interpreter, the combined program is the sequence of all `-l`
+files, followed by the optional `-e` expression. A symbol is closed if it is a
+builtin, a top-level definition in the combined program, or bound by a lexical
+form such as `lambda`, `let`, or `letrec`. Quoted data is not checked for free
+variables.
 
 ## Command-Line Interface
 
 The reference interpreter is non-interactive:
 
 ```bash
-/app/minischeme [-l FILE]... [-e EXPR] [FILE]...
+/app/minischeme [-l FILE]... [-e EXPR]
 ```
 
-Files passed with `-l` are loaded first. Positional files are evaluated next.
-If `-e` is present, the expression string is evaluated last. The final value is
-printed on stdout. Runtime and parse errors are printed as `error: ...` on
-stderr with a non-zero exit status.
+Files passed with `-l` are loaded in order. If `-e` is present, the expression
+string is evaluated last. The interpreter does not print final values
+automatically; use `display` for output. Runtime and parse errors are printed
+as `error: ...` on stderr with a non-zero exit status.

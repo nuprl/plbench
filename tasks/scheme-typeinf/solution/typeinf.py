@@ -313,6 +313,7 @@ def prims() -> Env:
     g.define("symbol->string", TFun((TSymbol(),), TString()))
     g.define("error", TFun((TString(),), TUnit()))
     g.define("apply", TFun((TFun((), TUnit()), TList(TUnit())), TUnit()))
+    g.define("display", TFun((TUnit(),), TBool()))
     return g
 
 
@@ -734,6 +735,11 @@ def infer_app(expr: list, env: Env) -> Type:
                 raise InferError("error arity")
             unify(arg_ts[0], TString())
             return fresh()  # never returns
+
+        if name == "display":
+            if len(arg_ts) != 1:
+                raise InferError("display arity")
+            return TBool()
 
     # general application
     ft = resolve(infer(expr[0], env))

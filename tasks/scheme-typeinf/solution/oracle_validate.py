@@ -36,7 +36,7 @@ def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
     cmd = [str(MINISCHEME)]
     if load_mceval:
         cmd.extend(["-l", str(MCEVAL)])
-    cmd.append(str(path))
+    cmd.extend(["-l", str(path)])
     c = run(cmd)
     return c.returncode, c.stdout, c.stderr
 
@@ -102,7 +102,7 @@ def main() -> int:
         ("(ms-eval (quote (and #t (< 1 2))) (ms-initial-env))", "#t"),
     ]
     for expr, expected in samples:
-        c = run([str(MINISCHEME), "-l", str(MCEVAL), "-e", expr])
+        c = run([str(MINISCHEME), "-l", str(MCEVAL), "-e", f"(display {expr})"])
         got = c.stdout.strip()
         if c.returncode != 0 or got != expected:
             print(f"FAIL mceval {expr}: expected {expected!r}, got {got!r}\n{c.stderr}")

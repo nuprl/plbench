@@ -1,6 +1,6 @@
 ;; Verifier metacircular MiniScheme interpreter (subset).
 ;; Load with the host:
-;;   /app/minischeme -l /tests/mceval.scm -e '(ms-eval (quote (+ 1 2)) (ms-initial-env))'
+;;   /app/minischeme -l /tests/mceval.scm -e '(display (ms-eval (quote (+ 1 2)) (ms-initial-env)))'
 ;;
 ;; API:
 ;;   (ms-initial-env)              -> initial environment
@@ -141,6 +141,7 @@
     ((eq? name 'vector-length) (vector-length (car args)))
     ((eq? name 'string-length) (string-length (car args)))
     ((eq? name 'string-append) (apply string-append args))
+    ((eq? name 'display) (display (car args)))
     ((eq? name 'error) (error (car args)))
     (else (error "ms-eval: unknown builtin"))))
 
@@ -195,5 +196,5 @@
    '(+ - * / = < > <= >= cons car cdr list null? pair? list? length append
      list-ref not eq? equal? number? integer? boolean? symbol? string?
      vector? procedure? vector vector-ref vector-length string-length
-     string-append error)
+     string-append display error)
    '()))

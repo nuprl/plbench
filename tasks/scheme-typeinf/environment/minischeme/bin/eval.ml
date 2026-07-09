@@ -34,25 +34,21 @@ and eval_special name expr env =
   | "quote" -> (
       match expr with
       | [ _; datum ] -> datum
-      | _ -> raise (Type_error "quote: expected 1 argument"))
+      | _ -> assert false)
   | "lambda" -> (
       match expr with
       | [ _; List params; body ] ->
           let ps =
-            List.map
-              (function
-                | Symbol s -> s
-                | _ -> raise (Type_error "lambda: params must be symbols"))
-              params
+            List.map (function Symbol s -> s | _ -> assert false) params
           in
           Closure { params = ps; body; env }
-      | _ -> raise (Type_error "lambda: expected (lambda (params) body)"))
+      | _ -> assert false)
   | "if" -> (
       match expr with
       | [ _; test; thn; els ] ->
           if is_truthy (eval_expr test env) then eval_expr thn env
           else eval_expr els env
-      | _ -> raise (Type_error "if: expected (if test then else)"))
+      | _ -> assert false)
   | "let" -> (
       match expr with
       | [ _; List bindings; body ] ->
@@ -61,11 +57,11 @@ and eval_special name expr env =
               (List.map
                  (function
                    | List [ Symbol n; e ] -> (n, eval_expr e env)
-                   | _ -> raise (Type_error "let: bad binding"))
+                   | _ -> assert false)
                  bindings)
           in
           eval_expr body (extend env names vals)
-      | _ -> raise (Type_error "let: expected (let ((x e) ...) body)"))
+      | _ -> assert false)
   | "letrec" -> (
       match expr with
       | [ _; List bindings; body ] ->
@@ -76,19 +72,16 @@ and eval_special name expr env =
                 | List [ Symbol n; e ] ->
                     define child n (Bool false);
                     (n, e)
-                | _ -> raise (Type_error "letrec: bad binding"))
+                | _ -> assert false)
               bindings
           in
           List.iter
             (fun (n, e) -> define child n (eval_expr e child))
             specs;
           eval_expr body child
-      | _ -> raise (Type_error "letrec: expected (letrec ((x e) ...) body)"))
-  | "begin" -> (
-      match expr with
-      | _ :: es when es <> [] ->
-          List.fold_left (fun _ e -> eval_expr e env) (Bool false) es
-      | _ -> raise (Type_error "begin: expected at least one expression"))
+      | _ -> assert false)
+  | "begin" ->
+      List.fold_left (fun _ e -> eval_expr e env) (Bool false) (List.tl expr)
   | "and" -> (
       let rec loop = function
         | [] -> Bool true
@@ -114,11 +107,11 @@ and eval_special name expr env =
         | List [ test; body ] :: rest ->
             if is_truthy (eval_expr test env) then eval_expr body env
             else loop rest
-        | _ -> raise (Type_error "cond: bad clause")
+        | _ -> assert false
       in
       loop (List.tl expr))
-  | "define" -> raise (Type_error "define: only valid at top level")
-  | _ -> raise (Runtime_error ("unknown special form: " ^ name))
+  | "define" -> assert false
+  | _ -> assert false
 
 let eval_define parts env =
   match parts with
@@ -128,16 +121,12 @@ let eval_define parts env =
       Symbol name
   | List (Symbol fname :: params) :: [ body ] ->
       let ps =
-        List.map
-          (function
-            | Symbol s -> s
-            | _ -> raise (Type_error "define: params must be symbols"))
-          params
+        List.map (function Symbol s -> s | _ -> assert false) params
       in
       let clo = Closure { params = ps; body; env } in
       define env fname clo;
       Symbol fname
-  | _ -> raise (Type_error "define: bad syntax")
+  | _ -> assert false
 
 let rec eval_toplevel forms env =
   let result = ref (Bool false) in
@@ -240,100 +229,101 @@ let builtin name arity fn =
   in
   (name, Builtin (name, wrapped))
 
-let make_global_env () : env =
-  let env = make_env () in
-  let install (name, v) = define env name v in
-  List.iter install
-    [
-      builtin "+" None (fun args -> add_nums (num_list ~who:"+" args));
-      builtin "-" None (fun args -> sub_nums (num_list ~who:"-" args));
-      builtin "*" None (fun args -> mul_nums (num_list ~who:"*" args));
-      builtin "/" None (fun args -> div_nums (num_list ~who:"/" args));
-      builtin "=" None (cmp_nums ( = ) ~who:"=");
-      builtin "<" None (cmp_nums ( < ) ~who:"<");
-      builtin ">" None (cmp_nums ( > ) ~who:">");
-      builtin "<=" None (cmp_nums ( <= ) ~who:"<=");
-      builtin ">=" None (cmp_nums ( >= ) ~who:">=");
-      builtin "number?" (Some 1) (function
+let display_value = function
+  | String s -> print_string s
+  | v -> print_string (to_string v)
+
+let global_bindings =
+  [
+    builtin "+" None (fun args -> add_nums (num_list ~who:"+" args));
+    builtin "-" None (fun args -> sub_nums (num_list ~who:"-" args));
+    builtin "*" None (fun args -> mul_nums (num_list ~who:"*" args));
+    builtin "/" None (fun args -> div_nums (num_list ~who:"/" args));
+    builtin "=" None (cmp_nums ( = ) ~who:"=");
+    builtin "<" None (cmp_nums ( < ) ~who:"<");
+    builtin ">" None (cmp_nums ( > ) ~who:">");
+    builtin "<=" None (cmp_nums ( <= ) ~who:"<=");
+    builtin ">=" None (cmp_nums ( >= ) ~who:">=");
+    builtin "number?" (Some 1) (function
         | [ Int _ ] | [ Float _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "integer?" (Some 1) (function
+    builtin "integer?" (Some 1) (function
         | [ Int _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "float?" (Some 1) (function
+    builtin "float?" (Some 1) (function
         | [ Float _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "boolean?" (Some 1) (function
+    builtin "boolean?" (Some 1) (function
         | [ Bool _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "string?" (Some 1) (function
+    builtin "string?" (Some 1) (function
         | [ String _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "symbol?" (Some 1) (function
+    builtin "symbol?" (Some 1) (function
         | [ Symbol _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "procedure?" (Some 1) (function
+    builtin "procedure?" (Some 1) (function
         | [ Closure _ ] | [ Builtin _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "null?" (Some 1) (function
+    builtin "null?" (Some 1) (function
         | [ List [] ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "pair?" (Some 1) (function
+    builtin "pair?" (Some 1) (function
         | [ List (_ :: _) ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "list?" (Some 1) (function
+    builtin "list?" (Some 1) (function
         | [ List _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "vector?" (Some 1) (function
+    builtin "vector?" (Some 1) (function
         | [ Vector _ ] -> Bool true
         | [ _ ] -> Bool false
         | _ -> assert false);
-      builtin "not" (Some 1) (function
+    builtin "not" (Some 1) (function
         | [ v ] -> Bool (not (as_bool ~who:"not" v))
         | _ -> assert false);
-      builtin "eq?" (Some 2) (function
+    builtin "eq?" (Some 2) (function
         | [ Symbol a; Symbol b ] -> Bool (a = b)
         | [ Bool a; Bool b ] -> Bool (a = b)
         | [ List []; List [] ] -> Bool true
         | [ a; b ] -> Bool (a == b)
         | _ -> assert false);
-      builtin "equal?" (Some 2) (function
+    builtin "equal?" (Some 2) (function
         | [ a; b ] -> Bool (equal a b)
         | _ -> assert false);
-      builtin "cons" (Some 2) (function
+    builtin "cons" (Some 2) (function
         | [ a; d ] -> List (a :: as_list ~who:"cons" d)
         | _ -> assert false);
-      builtin "car" (Some 1) (function
+    builtin "car" (Some 1) (function
         | [ v ] -> (
             match as_list ~who:"car" v with
             | [] -> raise (Type_error "car: empty list")
             | x :: _ -> x)
         | _ -> assert false);
-      builtin "cdr" (Some 1) (function
+    builtin "cdr" (Some 1) (function
         | [ v ] -> (
             match as_list ~who:"cdr" v with
             | [] -> raise (Type_error "cdr: empty list")
             | _ :: xs -> List xs)
         | _ -> assert false);
-      builtin "list" None (fun args -> List args);
-      builtin "length" (Some 1) (function
+    builtin "list" None (fun args -> List args);
+    builtin "length" (Some 1) (function
         | [ v ] -> Int (List.length (as_list ~who:"length" v))
         | _ -> assert false);
-      builtin "append" None (fun args ->
+    builtin "append" None (fun args ->
           List
             (List.concat
                (List.map (as_list ~who:"append") args)));
-      builtin "list-ref" (Some 2) (function
+    builtin "list-ref" (Some 2) (function
         | [ xs; i ] ->
             let lst = as_list ~who:"list-ref" xs in
             let idx = as_int ~who:"list-ref" i in
@@ -341,11 +331,11 @@ let make_global_env () : env =
               raise (Type_error "list-ref: index out of bounds")
             else List.nth lst idx
         | _ -> assert false);
-      builtin "vector" None (fun args -> Vector (Array.of_list args));
-      builtin "vector-length" (Some 1) (function
+    builtin "vector" None (fun args -> Vector (Array.of_list args));
+    builtin "vector-length" (Some 1) (function
         | [ v ] -> Int (Array.length (as_vector ~who:"vector-length" v))
         | _ -> assert false);
-      builtin "vector-ref" (Some 2) (function
+    builtin "vector-ref" (Some 2) (function
         | [ v; i ] ->
             let arr = as_vector ~who:"vector-ref" v in
             let idx = as_int ~who:"vector-ref" i in
@@ -353,14 +343,14 @@ let make_global_env () : env =
               raise (Type_error "vector-ref: index out of bounds")
             else arr.(idx)
         | _ -> assert false);
-      builtin "string-length" (Some 1) (function
+    builtin "string-length" (Some 1) (function
         | [ v ] -> Int (String.length (as_string ~who:"string-length" v))
         | _ -> assert false);
-      builtin "string-append" None (fun args ->
+    builtin "string-append" None (fun args ->
           String
             (String.concat ""
                (List.map (as_string ~who:"string-append") args)));
-      builtin "string-ref" (Some 2) (function
+    builtin "string-ref" (Some 2) (function
         | [ s; i ] ->
             let st = as_string ~who:"string-ref" s in
             let idx = as_int ~who:"string-ref" i in
@@ -368,19 +358,31 @@ let make_global_env () : env =
               raise (Type_error "string-ref: index out of bounds")
             else String (String.make 1 st.[idx])
         | _ -> assert false);
-      builtin "string->symbol" (Some 1) (function
+    builtin "string->symbol" (Some 1) (function
         | [ v ] -> Symbol (as_string ~who:"string->symbol" v)
         | _ -> assert false);
-      builtin "symbol->string" (Some 1) (function
+    builtin "symbol->string" (Some 1) (function
         | [ v ] -> String (as_symbol ~who:"symbol->string" v)
         | _ -> assert false);
-      builtin "error" (Some 1) (function
+    builtin "error" (Some 1) (function
         | [ v ] -> raise (Runtime_error (as_string ~who:"error" v))
         | _ -> assert false);
-      builtin "apply" (Some 2) (function
+    builtin "apply" (Some 2) (function
         | [ f; args ] -> apply_proc f (as_list ~who:"apply" args)
         | _ -> assert false);
-    ];
+    builtin "display" (Some 1) (function
+        | [ v ] ->
+            display_value v;
+            Bool false
+        | _ -> assert false);
+  ]
+
+let builtin_names () = List.map fst global_bindings
+
+let make_global_env () : env =
+  let env = make_env () in
+  let install (name, v) = define env name v in
+  List.iter install global_bindings;
   env
 
 let load_file path env =

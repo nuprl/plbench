@@ -34,12 +34,20 @@ MCEVAL_SELF = "hard-ok-05-mceval-self.scm"
 
 
 def run(cmd: list[str], timeout: float = 30) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(
+            cmd,
+            124,
+            e.stdout or "",
+            f"timeout after {timeout:g}s",
+        )
 
 
 def is_type_error(stderr: str, stdout: str) -> bool:
@@ -51,13 +59,13 @@ def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
     cmd = [str(MINISCHEME)]
     if load_mceval:
         cmd.extend(["-l", str(MCEVAL)])
-    cmd.append(str(path))
+    cmd.extend(["-l", str(path)])
     completed = run(cmd, timeout=60)
     return completed.returncode, completed.stdout, completed.stderr
 
 
 def typeinf(path: Path) -> tuple[int, str, str]:
-    completed = run([str(TYPEINF), str(path)], timeout=120)
+    completed = run([str(TYPEINF), str(path)], timeout=30)
     return completed.returncode, completed.stdout, completed.stderr
 
 
@@ -90,7 +98,7 @@ def check_mceval() -> tuple[bool, str]:
     ]
     for expr, expected in samples:
         completed = run(
-            [str(MINISCHEME), "-l", str(MCEVAL), "-e", expr],
+            [str(MINISCHEME), "-l", str(MCEVAL), "-e", f"(display {expr})"],
             timeout=60,
         )
         if completed.returncode != 0:
@@ -110,7 +118,7 @@ def grade_ok(path: Path) -> tuple[float, str]:
         return 0.0, f"UNSOUND: accepted but runtime type error:\n{herr}"
     if hrc != 0:
         return 0.0, f"accepted but host failed:\n{herr}\n{hout}"
-    return 1.0, f"accept ok; result={hout.strip()}"
+    return 1.0, "accept ok"
 
 
 def grade_bad(path: Path) -> tuple[bool, str]:
@@ -146,7 +154,7 @@ def grade_hard_ok(path: Path) -> tuple[float, str]:
         return 0.0, f"UNSOUND on hard-ok:\n{herr}"
     if hrc != 0:
         return 0.0, f"accepted but host failed:\n{herr}"
-    return 1.0, f"hard-ok accepted; result={hout.strip()}"
+    return 1.0, "hard-ok accepted"
 
 
 def write_reward(mean: float) -> None:

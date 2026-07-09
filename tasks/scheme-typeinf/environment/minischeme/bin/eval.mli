@@ -17,6 +17,9 @@ val eval_toplevel : Value.t list -> Value.env -> Value.t
     standard builtins. *)
 val make_global_env : unit -> Value.env
 
+(** [builtin_names ()] lists the names installed by [make_global_env ()]. *)
+val builtin_names : unit -> string list
+
 (** [load_file path env] parses and evaluates every form in [path] using
     [env], returning the final value. *)
 val load_file : string -> Value.env -> Value.t
