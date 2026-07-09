@@ -4,27 +4,36 @@ The environment provides **MiniScheme**, a small Scheme-like language
 implemented in OCaml at:
 
 ```
-/app/mscheme
+/app/minischeme
 ```
 
-Source lives under `/app/mscheme-src` (dune project). MiniScheme supports
+Source lives under `/app/minischeme-src` (dune project). MiniScheme supports
 higher-order functions, lists, vectors, strings, booleans, floats, ints,
 symbols, and `quote` / `'` (programs-as-data).
+
+The runtime language is specified in:
+
+```
+/app/Language.md
+```
 
 Examples:
 
 ```
-/app/mscheme -e '(+ 1 2)'
-/app/mscheme path/to/prog.scm
-/app/mscheme -l lib.scm -e '(my-fn 3)'
-/app/mscheme -l /app/mceval.scm -e '(ms-eval (quote (+ 1 2)) (ms-initial-env))'
+/app/minischeme -e '(+ 1 2)'
+/app/minischeme path/to/prog.scm
+/app/minischeme -l lib.scm -e '(my-fn 3)'
+/app/minischeme -l /app/mceval.scm -e '(ms-eval (quote (+ 1 2)) (ms-initial-env))'
 ```
+
+`/app/minischeme` is non-interactive. It evaluates files and/or `-e` input and
+does not provide a REPL.
 
 There is **no** prescribed type system. You invent the types and the
 inference algorithm. The only hard requirement is **soundness**:
 
 > If your checker accepts a program, evaluating that program with
-> `/app/mscheme` must not raise a **runtime type error**.
+> `/app/minischeme` must not raise a **runtime type error**.
 
 Runtime type errors include: applying a non-procedure, wrong arity, builtin
 argument of the wrong sort (e.g. `car` of an int), out-of-bounds
@@ -65,7 +74,7 @@ Usage:
    Load / exercise it with the host:
 
    ```
-   /app/mscheme -l /app/mceval.scm -e '(ms-eval (quote (+ 1 2)) (ms-initial-env))'
+   /app/minischeme -l /app/mceval.scm -e '(ms-eval (quote (+ 1 2)) (ms-initial-env))'
    ```
 
    That command should print `3`. Use `quote` / `'` freely — that is how

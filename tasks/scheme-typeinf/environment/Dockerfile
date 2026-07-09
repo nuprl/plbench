@@ -6,7 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 \
         ocaml \
-        ocaml-dune \
+        opam \
+        m4 \
         rustc \
         cargo \
         build-essential \
@@ -17,9 +18,14 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY mscheme /app/mscheme-src
+COPY Language.md /app/Language.md
+COPY minischeme /app/minischeme-src
 
-RUN cd /app/mscheme-src \
+RUN opam init --bare --disable-sandboxing -y \
+    && opam switch create minischeme ocaml-system -y \
+    && eval "$(opam env --switch=minischeme)" \
+    && opam install -y dune menhir cmdliner \
+    && cd /app/minischeme-src \
     && dune build \
-    && install -m 755 _build/default/bin/main.exe /app/mscheme \
-    && rm -rf /app/mscheme-src/_build
+    && install -m 755 _build/default/bin/main.exe /app/minischeme \
+    && rm -rf /app/minischeme-src/_build

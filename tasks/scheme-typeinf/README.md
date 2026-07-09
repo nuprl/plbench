@@ -1,7 +1,7 @@
 # nuprl/scheme-typeinf
 
 Invent a **sound** type inference algorithm for MiniScheme. The host is an
-OCaml dune project built into `/app/mscheme`. The agent also writes a
+OCaml dune project built into `/app/minischeme`. The agent also writes a
 metacircular interpreter; typing it (heterogeneous program-as-data) is an
 optional hard challenge.
 
@@ -9,12 +9,16 @@ optional hard challenge.
 
 | Path | Role |
 |------|------|
-| `environment/mscheme/` | OCaml MiniScheme (dune) → `/app/mscheme` |
+| `environment/Language.md` | MiniScheme runtime language definition, copied to `/app/Language.md` |
+| `environment/minischeme/` | OCaml MiniScheme (dune) → `/app/minischeme` |
 | `instruction.md` | Agent brief |
 | `tests/challenges/` | Hidden ok / bad / hard-ok programs |
 | `tests/mceval.scm` | Verifier reference metacircular interpreter |
 | `tests/test_suite.py` | Grades `/app/typeinf` for soundness |
 | `solution/` | Lame oracle (homogeneous lists) + runtime validation |
+
+The oracle is intentionally incomplete: it is a simple, sound baseline with
+homogeneous lists, not a target design.
 
 ## Verifier
 

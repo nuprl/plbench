@@ -2,7 +2,7 @@
 """Oracle validation: every challenge must match host crash/no-crash expectations.
 
 Also drives /app/mceval.scm (or the solution copy) on sample programs via
-/app/mscheme. Exits non-zero if any expectation fails.
+/app/minischeme. Exits non-zero if any expectation fails.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MSCHEME = Path("/app/mscheme")
+MINISCHEME = Path("/app/minischeme")
 MCEVAL = Path("/app/mceval.scm")
 CHALLENGES = Path("/tests/challenges")
 
@@ -33,7 +33,7 @@ def is_type_error(stderr: str, stdout: str) -> bool:
 
 
 def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
-    cmd = [str(MSCHEME)]
+    cmd = [str(MINISCHEME)]
     if load_mceval:
         cmd.extend(["-l", str(MCEVAL)])
     cmd.append(str(path))
@@ -42,8 +42,8 @@ def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
 
 
 def main() -> int:
-    if not MSCHEME.is_file():
-        print("oracle-validate: missing /app/mscheme", file=sys.stderr)
+    if not MINISCHEME.is_file():
+        print("oracle-validate: missing /app/minischeme", file=sys.stderr)
         return 1
     if not MCEVAL.is_file():
         print("oracle-validate: missing /app/mceval.scm", file=sys.stderr)
@@ -76,7 +76,7 @@ def main() -> int:
     for path in sorted(CHALLENGES.glob("hard-ok-*.scm")):
         if path.name == MCEVAL_SELF:
             # Ensure mceval source itself loads under the host.
-            c = run([str(MSCHEME), "-l", str(MCEVAL), "-e", "#t"])
+            c = run([str(MINISCHEME), "-l", str(MCEVAL), "-e", "#t"])
             if c.returncode != 0:
                 print(f"FAIL {path.name}: mceval.scm failed to load\n{c.stderr}")
                 failures += 1
@@ -102,7 +102,7 @@ def main() -> int:
         ("(ms-eval (quote (and #t (< 1 2))) (ms-initial-env))", "#t"),
     ]
     for expr, expected in samples:
-        c = run([str(MSCHEME), "-l", str(MCEVAL), "-e", expr])
+        c = run([str(MINISCHEME), "-l", str(MCEVAL), "-e", expr])
         got = c.stdout.strip()
         if c.returncode != 0 or got != expected:
             print(f"FAIL mceval {expr}: expected {expected!r}, got {got!r}\n{c.stderr}")

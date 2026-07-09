@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-MSCHEME = Path("/app/mscheme")
+MINISCHEME = Path("/app/minischeme")
 TYPEINF = Path("/app/typeinf")
 MCEVAL = Path("/app/mceval.scm")
 CHALLENGES = Path("/tests/challenges")
@@ -48,7 +48,7 @@ def is_type_error(stderr: str, stdout: str) -> bool:
 
 
 def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
-    cmd = [str(MSCHEME)]
+    cmd = [str(MINISCHEME)]
     if load_mceval:
         cmd.extend(["-l", str(MCEVAL)])
     cmd.append(str(path))
@@ -90,7 +90,7 @@ def check_mceval() -> tuple[bool, str]:
     ]
     for expr, expected in samples:
         completed = run(
-            [str(MSCHEME), "-l", str(MCEVAL), "-e", expr],
+            [str(MINISCHEME), "-l", str(MCEVAL), "-e", expr],
             timeout=60,
         )
         if completed.returncode != 0:
@@ -155,8 +155,8 @@ def write_reward(mean: float) -> None:
 
 
 def main() -> int:
-    if not MSCHEME.is_file():
-        print("missing /app/mscheme", file=sys.stderr)
+    if not MINISCHEME.is_file():
+        print("missing /app/minischeme", file=sys.stderr)
         write_reward(0.0)
         return 1
     if not TYPEINF.is_file():
