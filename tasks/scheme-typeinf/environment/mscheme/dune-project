@@ -1,0 +1,9 @@
+(lang dune 3.7)
+
+(name mscheme)
+
+(generate_opam_files false)
+
+(package
+ (name mscheme)
+ (synopsis "MiniScheme host interpreter"))

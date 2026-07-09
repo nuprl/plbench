@@ -1,0 +1,4 @@
+(executable
+ (public_name mscheme)
+ (name main)
+ (modules main value reader eval))

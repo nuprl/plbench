@@ -5,10 +5,11 @@
 name = "nuprl/plbench"
 description = "Programming-language implementation and type-system tasks"
 authors = []
-keywords = ["programming-languages", "ilvm", "typewhich"]
+keywords = ["programming-languages", "ilvm", "typewhich", "scheme"]
 
 tasks = [
   { path = "tasks/ilvm-interpreter" },
   { path = "tasks/ilvm-self-hosting-compiler" },
   { path = "tasks/typewhich" },
+  { path = "tasks/scheme-typeinf" },
 ]
