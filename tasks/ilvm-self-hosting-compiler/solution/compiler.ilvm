@@ -1,0 +1,8 @@
+// Placeholder. This oracle is not self-hosting (see compiler.scm and
+// README.md) -- the verifier never actually runs this file; it grades via
+// the fallback compiler (compile_scheme_to_ilvm.py) instead, once it finds
+// the ORACLE_MARKER in compiler.scm. This exists only so /app/compiler.ilvm
+// is present per the task's contract.
+block 0 {
+    abort;
+}

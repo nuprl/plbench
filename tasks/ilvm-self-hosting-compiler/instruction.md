@@ -1,55 +1,95 @@
-# Self-hosting ILVM compiler
+Your task is to design and implement a self-hosting compiler from a small
+Scheme-like language, MiniScheme, to a small register-based assembly
+language, ILVM.
 
-`Language.md` specifies the ILVM language.
+## What Is Provided
+
+ILVM is documented in `/app/ILVM.md`. MiniScheme is documented in
+`/app/Scheme.md`. Neither language has an implementation installed for
+you. You will need some way to run ILVM programs yourself while
+developing — write an interpreter, write a compiler to native code,
+whatever's fastest for you — but that tooling of yours isn't graded.
+
+We have also installed Python, OCaml, and Rust in this environment for you
+to use.
+
+## What You Must Build
 
 Install both of the following:
 
 ```
-/app/ilvm            # executable ILVM implementation
-/app/compiler.ilvm   # the compiler, written in ILVM
+/app/compiler.scm    # the compiler's source, itself a MiniScheme program
+/app/compiler.ilvm   # compiler.scm, compiled to ILVM by your own compiler
 ```
 
-`/app/compiler.ilvm` compiles ILVM source to a native executable for this
-machine and writes that executable to stdout.
+`compiler.scm` must be a well-formed MiniScheme program that defines a
+top-level function `main` taking exactly one argument: a MiniScheme string
+holding the complete source text of a MiniScheme program. Calling `main`
+on that string must `display` the complete source text of an equivalent
+ILVM program — one that, when run, behaves like the input program would
+under MiniScheme's semantics. `compiler.ilvm` must be the result of
+compiling `compiler.scm` with your own compiler: it must itself correctly
+implement everything `compiler.scm` specifies, as an ILVM program.
 
-## How we will test
+This calling convention applies to every program your compiler compiles,
+not just `compiler.scm` itself:
 
-### Fixed point
+- If the source program defines a top-level `main` taking one argument,
+  and the compiled ILVM program is run with exactly one command-line
+  argument, the compiled program must behave as if `(main ARG)` were
+  evaluated as one more top-level form, where `ARG` is that command-line
+  argument packed as a MiniScheme string (see `/app/ILVM.md` for how ILVM
+  programs receive command-line arguments).
+- If the source program has no `main`, or the compiled program is run
+  with no arguments, it just runs its top-level forms in order, same as
+  any other MiniScheme program.
+- A MiniScheme runtime error — whether from the `error` builtin or from a
+  runtime type error as defined in `/app/Scheme.md` (e.g. `(car '())`) —
+  must compile to an ILVM `abort;`. This is the only failure signal: there
+  is no separate "compile error" exit code, no stderr. The underlying
+  ILVM implementation's own process exits with a nonzero status when the
+  program it's running aborts, and with status 0 for any successful
+  `exit(v)` regardless of `v`.
+- On success, the compiled program's entire output (via
+  `print`/`print_str`) is the compiled ILVM program's source text and
+  nothing else — no wrapper, no extra lines.
+- `display` does not append a newline of its own, but every ILVM
+  `print`/`print_str` call does. If your compiled output maps each
+  `display` call directly to its own `print`/`print_str` call, you will
+  get a spurious extra newline between every pair of consecutive
+  `display`s — wrong output, since MiniScheme's `display` never inserts
+  one on its own. A compiled program that calls `display` more than once
+  needs to accumulate all of its output itself and emit it through a
+  single `print`/`print_str` at the very end, not one call per `display`.
 
-Compiling the compiler with itself must be a fixed point: the native binary
-you get by compiling `/app/compiler.ilvm` must, when used to compile
-`/app/compiler.ilvm` again, produce a **byte-identical** native binary.
+Illustrative usage, once you have some way to run ILVM programs (`ilvm`
+below stands in for whatever implementation you build or use):
 
+```bash
+ilvm -m MEM -r REGS /app/compiler.ilvm -f test_program.scm > out.ilvm
+ilvm -m MEM -r REGS out.ilvm
 ```
-/app/ilvm -m 4000000 -r 64 /app/compiler.ilvm -f /app/compiler.ilvm > /tmp/compiler1
-# strip the trailing "Normal termination. Result = ..." line from /app/ilvm
-chmod +x /tmp/compiler1
 
-/tmp/compiler1 /app/compiler.ilvm > /tmp/compiler2
-chmod +x /tmp/compiler2
+I will grade you using my own ILVM implementation, not one you wrote and
+not one you can see. Your compiler's correctness is judged independently
+of whatever ILVM tooling you built for your own use.
 
-cmp /tmp/compiler1 /tmp/compiler2
-```
+I will test the compiler two ways.
 
-### Correctness
+**Self-hosting.** I will run `compiler.ilvm` on the source text of
+`compiler.scm` itself, producing a second compiler, `compiler2.ilvm`.
+Then, for a battery of MiniScheme test programs, I will compile each one
+with both `compiler.ilvm` and `compiler2.ilvm`, run both compiled results,
+and check that they behave identically (same output, same success/abort
+outcome). Both runs must actually succeed and agree — if either aborts,
+or they disagree, that test case fails.
 
-With that native compiler, compile and run guest programs. Example guest
-`guest.ilvm`:
+**Correctness.** Independently, for the same battery of test programs, I
+will check that running the program compiled by `compiler.ilvm` produces
+the output I expect from that program's actual MiniScheme semantics.
 
-```
-block 0 {
-    exit(42);
-}
-```
-
-```
-/tmp/compiler1 guest.ilvm > /tmp/guest
-chmod +x /tmp/guest
-/tmp/guest
-```
-
-Expected:
-
-```
-Normal termination. Result = 42
-```
+You do not need to support every corner of MiniScheme to score well. I
+will test your compiler on a range of programs from simple arithmetic up
+through recursion, closures, and lists, and your score is proportional to
+how much you get right. Getting the easy cases solid and self-hosting
+right matters more than chasing full coverage.

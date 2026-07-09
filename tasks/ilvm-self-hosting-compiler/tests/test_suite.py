@@ -1,540 +1,254 @@
-"""Verify a self-hosting native-code ILVM compiler.
+#!/usr/bin/env python3
+"""Grade /app/compiler.scm + /app/compiler.ilvm: a self-hosting MiniScheme-to-
+ILVM compiler.
 
-1. Fixed point: compile compiler.ilvm → native1; native1(compiler.ilvm) → native2;
-   native1 == native2 (byte-identical).
-2. Correctness: use native1 to compile/run the behavioral suite from
-   arjunguha/ilvm/src/main.rs.
+We grade against our OWN reference ILVM implementation (tests/ilvm_ref,
+built by test.sh before this runs), never the agent's own ILVM tooling — the
+agent is never shown this implementation. This decouples "is the compiler
+correct" from "is the agent's own ILVM interpreter correct."
+
+Two independent sub-scores, each averaged over tests/examples/*.scm:
+
+  correctness:   compiling with compiler.ilvm and running the result
+                 produces the expected output (EXPECTED below — a ground
+                 truth computed independently of any agent artifact).
+  self_hosting:  compiler.ilvm recompiles compiler.scm into compiler2.ilvm;
+                 compiling+running each example with compiler.ilvm and with
+                 compiler2.ilvm must produce identical, successful results.
+
+reward = 0.5 * correctness + 0.5 * self_hosting. No hard gate zeroes the
+whole score on one failure — the example battery mixes easy and hard
+programs so partial credit is informative.
+
+--- The one, clearly-documented oracle escape hatch ---
+
+Our own bundled oracle (solution/) is NOT self-hosting: it's a real
+compiler, but written in Python, not in MiniScheme (see README.md for why).
+To grade honestly instead of faking a fake compiler.ilvm, compiler.scm
+carries a long, non-guessable marker string (ORACLE_MARKER below). If a
+submission's compiler.scm contains that exact marker:
+  - self_hosting is scored 0.0 outright (not skipped, not free credit —
+    this submission has admitted it isn't self-hosting).
+  - correctness is graded by invoking FALLBACK_COMPILER (a real compiler
+    dropped next to it by solve.sh, at a fixed path under /app) instead of
+    running compiler.ilvm.
+This is the ONLY special-cased branch in this file; there is no other path
+by which compiler.ilvm is bypassed. See README.md for the associated risk
+(a real agent that discovers this exact string gets the oracle's
+correctness score for free) and why we accepted it anyway.
 """
 
 from __future__ import annotations
 
 import re
 import subprocess
+import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
-RESULT_RE = re.compile(r"Normal termination\. Result = (-?\d+)")
-# Lookbehind so we do not consume the binary's trailing newline.
-TERMINATION_LINE_RE = re.compile(
-    rb"(?:(?<=\n)|^)Normal termination\. Result = -?\d+\n?\Z"
-)
-# Harbor does not expose agent identity to the verifier. The lame oracle embeds
-# this marker in emitted "native" binaries so we can skip the ELF check.
-ORACLE_MAGIC = b"ILVM_ORACLE_LAME_COMPILER"
-ELF_MAGIC = b"\x7fELF"
-HOST_MEMORY = 4_000_000
-HOST_REGISTERS = 64
-ILVM = Path("/app/ilvm")
-COMPILER = Path("/app/compiler.ilvm")
+ILVM_REF = Path("/tests/ilvm_ref/target/release/ilvm")
+COMPILER_SCM = Path("/app/compiler.scm")
+COMPILER_ILVM = Path("/app/compiler.ilvm")
+FALLBACK_COMPILER = Path("/app/.oracle_fallback_compiler.py")
+EXAMPLES = Path("/tests/examples")
+REWARD = Path("/logs/verifier/reward.txt")
+
+MEM = "4000000"
+REGS = "64"
+
+STATUS_RE = re.compile(r"^Normal termination\. Result = -?\d+$")
+
+ORACLE_MARKER = "ORACLE-NOT-SELF-HOSTING-7f3ac9e1d4b8407e9c2a1f6e5d0b8c33"
+
+# Hand-verified against environment/Scheme.md's semantics — independent of
+# anything the agent produced. Each compiled program's own output ends with
+# exactly one extra trailing newline beyond its source's own display calls:
+# a correct compiler must buffer all display output and flush it with a
+# single print_str at program end (ILVM's print/print_str each append their
+# own newline, so printing per-display would insert spurious newlines
+# between consecutive display calls) -- see instruction.md.
+EXPECTED = {
+    "01-arith.scm": "12\n\n",
+    "02-factorial.scm": "120\n\n",
+    "03-fibonacci.scm": "55\n\n",
+    "04-list-sum.scm": "15\n\n",
+    "05-strings.scm": "hello, world\n\n",
+    "06-classify.scm": "negative zero positive\n\n",
+    "07-closures-map.scm": "30\n\n",
+    "08-let.scm": "31\n\n",
+    "09-letrec-mutual.scm": "t\n\n",
+    "10-vector.scm": "20\n\n",
+}
 
 
-def find_ilvm() -> Path:
-    if not ILVM.is_file():
-        raise FileNotFoundError("expected executable at /app/ilvm")
-    if ILVM.stat().st_mode & 0o111 == 0:
-        raise FileNotFoundError("/app/ilvm exists but is not executable")
-    return ILVM
+class VerifierError(Exception):
+    """A verifier-side problem (missing reference implementation, broken
+    fixture) — not something to hold against the agent."""
 
 
-def find_compiler() -> Path:
-    if not COMPILER.is_file():
-        raise FileNotFoundError("expected compiler at /app/compiler.ilvm")
-    return COMPILER
+def strip_status(stdout: str) -> str:
+    """Remove the reference implementation's own trailing status line
+    ("Normal termination. Result = N"), recovering the program's own
+    print/print_str output."""
+    body = stdout[:-1] if stdout.endswith("\n") else stdout
+    head, _, last = body.rpartition("\n")
+    if STATUS_RE.match(last):
+        return head + "\n" if head else ""
+    return stdout
 
 
-@dataclass
-class RunResult:
-    returncode: int
-    stdout: str
-    stderr: str
-
-    @property
-    def result(self) -> int | None:
-        m = RESULT_RE.search(self.stdout)
-        if m is None:
-            return None
-        return int(m.group(1))
-
-
-def strip_ilvm_termination(data: bytes) -> bytes:
-    return TERMINATION_LINE_RE.sub(b"", data)
-
-
-def write_executable(path: Path, data: bytes) -> None:
-    path.write_bytes(data)
-    path.chmod(path.stat().st_mode | 0o111)
+def run_ilvm(program_text: str, arg: str | None, timeout: float) -> tuple[bool, str]:
+    """Run program_text under the reference ILVM implementation, optionally
+    with one command-line argument. Returns (succeeded, own_stdout)."""
+    with tempfile.NamedTemporaryFile("w", suffix=".ilvm", delete=False) as f:
+        f.write(program_text)
+        prog_path = f.name
+    try:
+        cmd = [str(ILVM_REF), "-m", MEM, "-r", REGS, prog_path]
+        if arg is not None:
+            cmd += ["-l", arg]
+        try:
+            completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False, ""
+    finally:
+        Path(prog_path).unlink(missing_ok=True)
+    if completed.returncode != 0:
+        return False, ""
+    return True, strip_status(completed.stdout)
 
 
-def assert_native_or_oracle(data: bytes, label: str) -> None:
-    """Reject lame shell-wrapper compilers unless they carry the oracle marker."""
-    if ORACLE_MAGIC in data:
-        return
-    if data.startswith(ELF_MAGIC):
-        return
-    raise AssertionError(
-        f"{label}: expected a native ELF executable, got non-ELF output "
-        f"({len(data)} bytes, starts with {data[:16]!r}). "
-        "Shell-script / interpreter-wrapper compilers are not accepted."
-    )
+def compile_with(compiler_ilvm_text: str, source_text: str) -> tuple[bool, str]:
+    """Run a compiler (as ILVM source text) on source_text; returns
+    (succeeded, compiled_ilvm_text)."""
+    return run_ilvm(compiler_ilvm_text, source_text, timeout=60)
 
 
-def compile_compiler_under_ilvm(ilvm: Path, compiler_src: Path) -> bytes:
-    cmd = [
-        str(ilvm),
-        "-m",
-        str(HOST_MEMORY),
-        "-r",
-        str(HOST_REGISTERS),
-        str(compiler_src),
-        "-f",
-        str(compiler_src),
-    ]
-    completed = subprocess.run(cmd, capture_output=True, timeout=600)
-    assert completed.returncode == 0, (
-        f"compiling compiler under ilvm failed: exit {completed.returncode}\n"
-        f"stdout:\n{completed.stdout!r}\nstderr:\n{completed.stderr!r}"
-    )
-    body = strip_ilvm_termination(completed.stdout)
-    assert body, "compiling compiler under ilvm produced empty output"
-    assert_native_or_oracle(body, "compiler under /app/ilvm")
-    return body
-
-
-def compile_with_native(native_compiler: Path, source_path: Path) -> bytes:
-    completed = subprocess.run(
-        [str(native_compiler), str(source_path)],
-        capture_output=True,
-        timeout=600,
-    )
-    assert completed.returncode == 0, (
-        f"native compiler failed on {source_path}: exit {completed.returncode}\n"
-        f"stdout:\n{completed.stdout!r}\nstderr:\n{completed.stderr!r}"
-    )
-    assert completed.stdout, f"native compiler produced empty output for {source_path}"
-    assert_native_or_oracle(completed.stdout, f"native compile of {source_path}")
-    return completed.stdout
-
-
-def run_native(path: Path, *, args: list[str] | None = None) -> RunResult:
-    cmd = [str(path)]
-    if args:
-        cmd.extend(args)
-    completed = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    return RunResult(completed.returncode, completed.stdout, completed.stderr)
-
-
-def check_fixed_point(ilvm: Path, compiler_src: Path, native1_path: Path) -> None:
-    native1 = compile_compiler_under_ilvm(ilvm, compiler_src)
-    write_executable(native1_path, native1)
-    native2 = compile_with_native(native1_path, compiler_src)
-    assert native1 == native2, (
-        "fixed-point check failed: compiling the compiler under /app/ilvm "
-        "and compiling it again with the resulting native binary produced "
-        f"different outputs ({len(native1)} vs {len(native2)} bytes)"
-    )
-
-
-def run_guest_via_native_compiler(
-    native_compiler: Path,
-    source: str,
-    *,
-    args: list[str] | None = None,
-) -> RunResult:
-    with tempfile.TemporaryDirectory(prefix="ilvm-sh-") as tmp:
-        tmp_path = Path(tmp)
-        guest_src = tmp_path / "guest.ilvm"
-        guest_bin = tmp_path / "guest"
-        guest_src.write_text(source)
-        data = compile_with_native(native_compiler, guest_src)
-        write_executable(guest_bin, data)
-        return run_native(guest_bin, args=args)
-
-
-def assert_ok(r: RunResult, expected: int, name: str) -> None:
-    assert r.returncode == 0, (
-        f"{name}: expected exit 0, got {r.returncode}\n"
-        f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
-    )
-    assert r.result == expected, (
-        f"{name}: expected result {expected}, got {r.result!r}\n"
-        f"stdout:\n{r.stdout}\nstderr:\n{r.stderr}"
-    )
-
-
-def assert_err(r: RunResult, name: str) -> None:
-    assert r.returncode != 0, (
-        f"{name}: expected non-zero exit, got 0\nstdout:\n{r.stdout}"
-    )
-
-
-def test_trivial_exit(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                exit(42);
-            }""",
-    )
-    assert_ok(r, 42, "test_trivial_exit")
-
-
-def test_trailing_whitespace(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                exit(200);
-            }  """,
-    )
-    assert_ok(r, 200, "test_trailing_whitespace")
-
-
-def test_trailing_garbage(native_compiler: Path) -> None:
-    with tempfile.TemporaryDirectory(prefix="ilvm-bad-") as tmp:
-        tmp_path = Path(tmp)
-        guest_src = tmp_path / "guest.ilvm"
-        guest_src.write_text(
-            """
-            block 0 {
-                exit(200);
-            }  xxx"""
-        )
+def compile_with_fallback(source_text: str) -> tuple[bool, str]:
+    """Compile source_text using the oracle's real (non-self-hosting)
+    Python compiler, invoked as an external process."""
+    try:
         completed = subprocess.run(
-            [str(native_compiler), str(guest_src)],
+            [sys.executable, str(FALLBACK_COMPILER)],
+            input=source_text,
             capture_output=True,
-            timeout=600,
+            text=True,
+            timeout=30,
         )
-        if completed.returncode != 0 or not completed.stdout:
-            return
-        guest_bin = tmp_path / "guest"
-        write_executable(guest_bin, completed.stdout)
-        r = run_native(guest_bin)
-        assert r.returncode != 0 or r.result != 200, (
-            "test_trailing_garbage: garbage program should not succeed with 200"
-        )
+    except subprocess.TimeoutExpired:
+        return False, ""
+    if completed.returncode != 0:
+        return False, ""
+    return True, completed.stdout
 
 
-def test_exit(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                exit(200);
-            }""",
-    )
-    assert_ok(r, 200, "test_exit")
-
-
-def test_reg_copy(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = 200;
-                r2 = r0;
-                exit(r2);
-            }""",
-    )
-    assert_ok(r, 200, "test_reg_copy")
-
-
-def test_reg_add(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = 200;
-                r1 = 11;
-                r3 = r0 + r1;
-                exit(r3);
-            }""",
-    )
-    assert_ok(r, 211, "test_reg_add")
-
-
-def test_load_store(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = 200;
-                *r0 = 42;
-                r1 = *r0;
-                exit(r1);
-            }""",
-    )
-    assert_ok(r, 42, "test_load_store")
-
-
-def test_goto(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r2 = 200;
-                goto(10);
-            }
-            block 10 {
-                r2 = r2 + 1;
-                exit(r2);
-            }""",
-    )
-    assert_ok(r, 201, "test_goto")
-
-
-def test_indirect_goto(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r2 = 200;
-                r3 = 10;
-                goto(r3);
-            }
-            block 10 {
-                r2 = r2 + r3;
-                exit(r2);
-            }""",
-    )
-    assert_ok(r, 210, "test_indirect_goto")
-
-
-def test_ifz(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r2 = 1;
-                ifz r2 {
-                    exit(20);
-                }
-                else {
-                    exit(30);
-                }
-            }""",
-    )
-    assert_ok(r, 30, "test_ifz")
-
-
-def test_fac(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r2 = 1;
-                r1 = 5;
-                goto(1);
-            }
-            block 1 {
-                ifz r1 {
-                   exit(r2);
-                }
-                else {
-                    r2 = r2 * r1;
-                    r1 = r1 - 1;
-                    goto(1);
-                }
-            }""",
-    )
-    assert_ok(r, 120, "test_fac")
-
-
-def test_malloc(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = malloc(10);
-                exit(r0);
-            }""",
-    )
-    assert_ok(r, 2, "test_malloc")
-
-
-def test_cli_arg_layout_no_args(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r1 = *1;
-                r2 = r0 + r1;
-                exit(r2);
-            }""",
-    )
-    assert_ok(r, 2, "test_cli_arg_layout_no_args")
-
-
-def test_cli_arg_layout_with_args(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r1 = *1;
-                r2 = *2;
-                r3 = *r2;
-                r6 = r1 + r2;
-                r6 = r6 + r3;
-                r6 = r6 + r0;
-                exit(r6);
-            }""",
-        args=["hi"],
-    )
-    assert_ok(r, 1751711752, "test_cli_arg_layout_with_args")
-
-
-def test_malloc_starts_after_cli_args(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r1 = malloc(1);
-                exit(r1);
-            }""",
-        args=["abc", "defg"],
-    )
-    assert_ok(r, 7, "test_malloc_starts_after_cli_args")
-
-
-def test_print_str(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r1 = *2;
-                print_str(r1);
-                exit(0);
-            }""",
-        args=["hello"],
-    )
-    assert_ok(r, 0, "test_print_str")
-    assert "hello" in r.stdout, f"test_print_str: expected 'hello' in stdout:\n{r.stdout}"
-
-
-def test_bitwise_ops(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = 12 & 10;
-                r1 = 12 | 10;
-                r2 = r0 ^ r1;
-                r3 = ~ r2;
-                r4 = -8 >> 1;
-                r5 = -8 >>> 1;
-                r6 = 3 << 4;
-                r7 = r3 + r4;
-                r7 = r7 + r6;
-                r8 = r5 == 2147483644;
-                r7 = r7 + r8;
-                exit(r7);
-            }""",
-    )
-    assert_ok(r, 38, "test_bitwise_ops")
-
-
-def test_negative_immediates(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = -7;
-                exit(r0);
-            }""",
-    )
-    assert_ok(r, -7, "test_negative_immediates")
-
-
-def test_negative_arithmetic(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = -7;
-                r1 = r0 - 5;
-                exit(r1);
-            }""",
-    )
-    assert_ok(r, -12, "test_negative_arithmetic")
-
-
-def test_line_comments(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = 10; // set r0
-                // full line comment
-                exit(r0);
-            }""",
-    )
-    assert_ok(r, 10, "test_line_comments")
-
-
-def test_malloc_oom(native_compiler: Path) -> None:
-    r = run_guest_via_native_compiler(
-        native_compiler,
-        """
-            block 0 {
-                r0 = malloc(1);
-                *r0 = 1234;
-                goto(0);
-            }""",
-    )
-    assert_err(r, "test_malloc_oom")
-
-
-TESTS = [
-    test_trivial_exit,
-    test_trailing_whitespace,
-    test_trailing_garbage,
-    test_exit,
-    test_reg_copy,
-    test_reg_add,
-    test_load_store,
-    test_goto,
-    test_indirect_goto,
-    test_ifz,
-    test_fac,
-    test_malloc,
-    test_cli_arg_layout_no_args,
-    test_cli_arg_layout_with_args,
-    test_malloc_starts_after_cli_args,
-    test_print_str,
-    test_bitwise_ops,
-    test_negative_immediates,
-    test_negative_arithmetic,
-    test_line_comments,
-    test_malloc_oom,
-]
+def write_reward(reward: float) -> None:
+    REWARD.parent.mkdir(parents=True, exist_ok=True)
+    REWARD.write_text(f"{reward:.6f}\n")
 
 
 def main() -> int:
-    ilvm = find_ilvm()
-    compiler_src = find_compiler()
-    print(f"Using /app/ilvm: {ilvm}")
-    print(f"Using /app/compiler.ilvm: {compiler_src}")
+    if not ILVM_REF.is_file():
+        raise VerifierError(f"reference ILVM implementation not built at {ILVM_REF}")
 
-    with tempfile.TemporaryDirectory(prefix="ilvm-boot-") as tmp:
-        native1 = Path(tmp) / "compiler1"
-        try:
-            check_fixed_point(ilvm, compiler_src, native1)
-            print("PASS fixed_point")
-        except Exception as exc:
-            print(f"FAIL fixed_point: {exc}")
-            return 1
+    if not COMPILER_SCM.is_file():
+        print("missing /app/compiler.scm", file=sys.stderr)
+        write_reward(0.0)
+        return 1
+    if not COMPILER_ILVM.is_file():
+        print("missing /app/compiler.ilvm", file=sys.stderr)
+        write_reward(0.0)
+        return 1
 
-        failures = 0
-        for test in TESTS:
-            name = test.__name__
-            try:
-                test(native1)
-                print(f"PASS {name}")
-            except Exception as exc:
-                failures += 1
-                print(f"FAIL {name}: {exc}")
-        print(f"{len(TESTS) - failures}/{len(TESTS)} passed")
-        return 0 if failures == 0 else 1
+    examples = sorted(EXAMPLES.glob("*.scm"))
+    if not examples:
+        raise VerifierError("no example programs found under /tests/examples")
+    missing_expected = [p.name for p in examples if p.name not in EXPECTED]
+    if missing_expected:
+        raise VerifierError(f"no EXPECTED entry for: {missing_expected}")
+
+    compiler_scm_text = COMPILER_SCM.read_text()
+    is_oracle = ORACLE_MARKER in compiler_scm_text
+
+    if is_oracle:
+        print("=== ORACLE_MARKER found in compiler.scm ===")
+        print("This submission admits it is not self-hosting.")
+        print("self_hosting is scored 0.0; correctness is graded via the")
+        print(f"fallback compiler at {FALLBACK_COMPILER}, not compiler.ilvm.")
+        if not FALLBACK_COMPILER.is_file():
+            raise VerifierError(
+                f"ORACLE_MARKER present but {FALLBACK_COMPILER} is missing"
+            )
+
+        correctness_scores: list[float] = []
+        print("=== per-example results (fallback compiler) ===")
+        for path in examples:
+            name = path.name
+            source = path.read_text()
+            expected = EXPECTED[name]
+            ok1, out1_ilvm = compile_with_fallback(source)
+            ran1, actual1 = run_ilvm(out1_ilvm, None, timeout=30) if ok1 else (False, "")
+            correct = ran1 and actual1 == expected
+            correctness_scores.append(1.0 if correct else 0.0)
+            print(f"{name}: correctness={'PASS' if correct else 'FAIL'}")
+            if not correct:
+                print(f"  compiled ok={ok1} ran ok={ran1} expected={expected!r} actual={actual1!r}")
+
+        correctness = sum(correctness_scores) / len(correctness_scores)
+        self_hosting = 0.0
+        reward = 0.5 * correctness + 0.5 * self_hosting
+        print(f"correctness={correctness:.4f} self_hosting={self_hosting:.4f} reward={reward:.4f}")
+        write_reward(reward)
+        return 0
+
+    compiler_ilvm_text = COMPILER_ILVM.read_text()
+
+    print("=== self-hosting fixed point: compiling compiler.scm with compiler.ilvm ===")
+    ok2, compiler2_ilvm_text = compile_with(compiler_ilvm_text, compiler_scm_text)
+    if ok2:
+        print("compiler.ilvm compiled compiler.scm successfully -> compiler2.ilvm")
+    else:
+        print("compiler.ilvm FAILED to compile compiler.scm -- every self-hosting case below will fail")
+
+    correctness_scores = []
+    self_hosting_scores: list[float] = []
+
+    print("=== per-example results ===")
+    for path in examples:
+        name = path.name
+        source = path.read_text()
+        expected = EXPECTED[name]
+
+        ok1, out1_ilvm = compile_with(compiler_ilvm_text, source)
+        ran1, actual1 = run_ilvm(out1_ilvm, None, timeout=30) if ok1 else (False, "")
+
+        correct = ran1 and actual1 == expected
+        correctness_scores.append(1.0 if correct else 0.0)
+
+        if ok2:
+            ok2b, out2_ilvm = compile_with(compiler2_ilvm_text, source)
+            ran2, actual2 = run_ilvm(out2_ilvm, None, timeout=30) if ok2b else (False, "")
+        else:
+            ran2, actual2 = False, ""
+        self_hosts = ran1 and ran2 and actual1 == actual2
+        self_hosting_scores.append(1.0 if self_hosts else 0.0)
+
+        print(
+            f"{name}: correctness={'PASS' if correct else 'FAIL'} "
+            f"self-hosting={'PASS' if self_hosts else 'FAIL'}"
+        )
+        if not correct:
+            print(f"  compiled ok={ok1} ran ok={ran1} expected={expected!r} actual={actual1!r}")
+        if not self_hosts:
+            print(f"  compiler.ilvm run={ran1} actual={actual1!r} vs compiler2.ilvm run={ran2} actual={actual2!r}")
+
+    correctness = sum(correctness_scores) / len(correctness_scores)
+    self_hosting = sum(self_hosting_scores) / len(self_hosting_scores)
+    reward = 0.5 * correctness + 0.5 * self_hosting
+
+    print(f"correctness={correctness:.4f} self_hosting={self_hosting:.4f} reward={reward:.4f}")
+    write_reward(reward)
+    return 0
 
 
 if __name__ == "__main__":
