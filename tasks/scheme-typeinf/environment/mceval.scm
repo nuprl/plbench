@@ -1,6 +1,6 @@
-;; Verifier metacircular MiniScheme interpreter (subset).
+;; Provided metacircular MiniScheme interpreter (subset).
 ;; Load with the host:
-;;   /app/minischeme -l /tests/mceval.scm -e '(display (ms-eval (quote (+ 1 2)) (ms-initial-env)))'
+;;   /app/minischeme -l /app/mceval.scm -e '(display (ms-eval (quote (+ 1 2)) (ms-initial-env)))'
 ;;
 ;; API:
 ;;   (ms-initial-env)              -> initial environment

@@ -19,6 +19,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY Language.md /app/Language.md
+COPY mceval.scm /app/mceval.scm
 COPY minischeme /app/minischeme-src
 
 RUN opam init --bare --disable-sandboxing -y \

@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
-"""Grade /app/typeinf for MiniScheme soundness.
+"""Grade /app/typeinf with a binary, all-or-nothing result.
 
-Challenge files live in /tests/challenges/:
-  ok-*.scm       — easy: must accept; must run without runtime type error
-  bad-*.scm      — soundness gate: any miss → reward 0.0
-  hard-ok-*.scm  — hard: optional accept; if accepted, must not type-error
+The challenge directory is the source of truth:
 
-Score (when all bad-* are correctly rejected and nothing unsound is accepted):
-  0.5 * mean(ok-*) + 0.5 * mean(hard-ok-*)
+* ``bad-*.scm`` programs must be rejected by typeinf and must produce a runtime
+  type error under the trusted MiniScheme interpreter.
+* ``ok-*.scm`` and ``hard-ok-*.scm`` programs must be accepted by typeinf and
+  must run cleanly under MiniScheme.
 
-Before grading /app/typeinf on any fixture, we first establish ground truth by
-running the fixture on the host (ok-*/hard-ok-* must run cleanly; bad-* must
-runtime-type-error). If a fixture doesn't match the ground truth its category
-promises, that's a bug in the fixture, not the agent — we raise VerifierError
-and abort without writing a reward, rather than silently scoring the agent
-against a broken test.
-
-/app/mceval.scm is a metacircular interpreter supplied by the verifier
-(test.sh copies it in from /tests/mceval.scm) — agents are not expected to
-write it themselves.
-hard-ok-03/04 load /app/mceval.scm and type-check + host-run a client
-expression that calls into it (ms-eval/ms-initial-env), i.e. they exercise
-applications of mceval, not just its own definitions.
-hard-ok-05 types /app/mceval.scm itself.
+Before grading, metacircular clients are assembled into ordinary standalone
+MiniScheme programs by prefixing `/app/mceval.scm`. The mceval-self marker is
+resolved directly to `/app/mceval.scm`. Consequently, every challenge reaches
+the same grading function as a name, one program path, and one expected typeinf
+decision. The reward is 1 only when every decision is correct; otherwise it is
+0. Host/reference mismatches are verifier bugs and abort grading without a
+reward.
 """
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 MINISCHEME = Path("/app/minischeme")
@@ -38,33 +32,43 @@ MCEVAL = Path("/app/mceval.scm")
 CHALLENGES = Path("/tests/challenges")
 REWARD = Path("/logs/verifier/reward.txt")
 
-MCEVAL_CLIENTS = {
-    "hard-ok-03-mceval-arith.scm",
-    "hard-ok-04-mceval-lambda.scm",
+# These files are supplied by the environment but live in the agent-writable
+# /app tree. Verify their exact build contents before trusting either one for
+# fixture validation or metacircular-program assembly.
+TRUSTED_MD5 = {
+    MINISCHEME: "bf2271a9d0e0eda33003c0668beaec46",
+    MCEVAL: "02932a272e22722800ef9871d19b2299",
 }
-MCEVAL_SELF = "hard-ok-05-mceval-self.scm"
 
 
-def run(cmd: list[str], timeout: float = 30) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as e:
-        return subprocess.CompletedProcess(
-            cmd,
-            124,
-            e.stdout or "",
-            f"timeout after {timeout:g}s",
-        )
+@dataclass(frozen=True)
+class Case:
+    """One fully assembled grading case.
+
+    `program` is the exact source passed both to the trusted interpreter and to
+    the submission. `should_accept` is therefore the only distinction the
+    grading loop needs to make between positive and negative fixtures.
+    """
+
+    name: str
+    program: Path
+    should_accept: bool
 
 
 class VerifierError(Exception):
-    """A fixture didn't behave as its category promises — a test-suite bug,
-    not something to hold against the agent."""
+    """A fixture disagrees with its declared trusted-runtime behavior."""
+
+
+def run(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        return subprocess.CompletedProcess(
+            cmd,
+            124,
+            error.stdout or "",
+            f"timeout after {timeout:g}s",
+        )
 
 
 def is_type_error(stderr: str, stdout: str) -> bool:
@@ -72,149 +76,147 @@ def is_type_error(stderr: str, stdout: str) -> bool:
     return text.startswith("error:") or "\nerror:" in text or "error: " in text
 
 
-def host_eval(path: Path, *, load_mceval: bool = False) -> tuple[int, str, str]:
-    cmd = [str(MINISCHEME)]
-    if load_mceval:
-        cmd.extend(["-l", str(MCEVAL)])
-    cmd.extend(["-l", str(path)])
-    completed = run(cmd, timeout=60)
-    return completed.returncode, completed.stdout, completed.stderr
+def md5(path: Path) -> str:
+    """Return the hexadecimal MD5 digest of a file without loading it at once."""
+
+    digest = hashlib.md5()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
-def typeinf(path: Path) -> tuple[int, str, str]:
-    completed = run([str(TYPEINF), str(path)], timeout=30)
-    return completed.returncode, completed.stdout, completed.stderr
+def inputs_are_trusted() -> bool:
+    """Check the submission exists and the two environment references are intact.
+
+    `/app/typeinf` is intentionally agent-controlled, so only its presence is
+    required. MiniScheme and mceval are verifier inputs despite residing under
+    `/app`; their embedded digests ensure an agent cannot replace either one and
+    then grade itself against the replacement.
+    """
+
+    if not TYPEINF.is_file():
+        print(f"missing submission: {TYPEINF}", file=sys.stderr)
+        return False
+
+    trusted = True
+    for path, expected in TRUSTED_MD5.items():
+        if not path.is_file():
+            print(f"missing trusted file: {path}", file=sys.stderr)
+            trusted = False
+            continue
+        actual = md5(path)
+        if actual != expected:
+            print(
+                f"trusted file hash mismatch: {path} "
+                f"(expected {expected}, got {actual})",
+                file=sys.stderr,
+            )
+            trusted = False
+    return trusted
 
 
-def typeinf_with_mceval(client: Path) -> tuple[int, str, str]:
-    """Type-check mceval.scm concatenated with a client program."""
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".scm", delete=False, prefix="mceval-client-"
-    ) as tmp:
-        tmp.write(MCEVAL.read_text())
-        tmp.write("\n")
-        tmp.write(client.read_text())
-        tmp_path = Path(tmp.name)
-    try:
-        return typeinf(tmp_path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+def assemble_positive(path: Path, directory: Path) -> Path:
+    """Return the standalone program represented by one positive fixture.
+
+    Ordinary fixtures already are standalone. A filename ending in
+    `-mceval-self.scm` is a marker for the provided interpreter itself. Other
+    filenames containing `-mceval-` are clients, so their source is appended to
+    the interpreter in a temporary file. This is the verifier's only mceval
+    exception; after assembly those programs are graded exactly like all other
+    cases.
+    """
+
+    if path.name.endswith("-mceval-self.scm"):
+        return MCEVAL
+    if "-mceval-" not in path.name:
+        return path
+
+    assembled = directory / path.name
+    assembled.write_text(MCEVAL.read_text() + "\n" + path.read_text())
+    return assembled
 
 
-def expect_runs_clean(path: Path, *, load_mceval: bool = False) -> None:
-    """Ground truth for ok-*/hard-ok-* fixtures: must run on the host without
-    error. Raises VerifierError if the fixture itself is broken."""
-    hrc, hout, herr = host_eval(path, load_mceval=load_mceval)
-    if hrc != 0:
+def assemble_cases(directory: Path) -> list[Case]:
+    """Discover every fixture and resolve it to a standalone grading case."""
+
+    bad = [Case(path.name, path, False) for path in sorted(CHALLENGES.glob("bad-*.scm"))]
+    positive_paths = sorted(CHALLENGES.glob("ok-*.scm")) + sorted(
+        CHALLENGES.glob("hard-ok-*.scm")
+    )
+    positive = [
+        Case(path.name, assemble_positive(path, directory), True)
+        for path in positive_paths
+    ]
+    return bad + positive
+
+
+def grade_case(case: Case) -> tuple[bool, str]:
+    """Validate and grade one fully assembled case.
+
+    The trusted interpreter first checks the fixture's declaration: positive
+    programs must complete without error, while negative programs must fail
+    specifically with a runtime type error. Only after that invariant is
+    established do we run `/app/typeinf` on the identical source. A submission
+    passes exactly when its zero/nonzero exit status matches `should_accept`.
+    Thus crashes and timeouts reject positive programs but cannot accidentally
+    accept negative ones, and fixture mistakes are never charged to an agent.
+    """
+
+    host = run([str(MINISCHEME), "-l", str(case.program)], timeout=60)
+    if case.should_accept and host.returncode != 0:
         raise VerifierError(
-            f"fixture {path.name} is labeled ok but the host failed (rc={hrc}):\n{herr}\n{hout}"
+            f"{case.name} is labeled ok but the host failed (rc={host.returncode}):\n"
+            f"{host.stderr}\n{host.stdout}"
         )
+    if not case.should_accept:
+        if host.returncode == 0:
+            raise VerifierError(f"{case.name} is labeled bad but the host accepted it")
+        if not is_type_error(host.stderr, host.stdout):
+            raise VerifierError(
+                f"{case.name} is labeled bad but failed without a type error "
+                f"(rc={host.returncode}):\n{host.stderr}\n{host.stdout}"
+            )
+
+    submission = run([str(TYPEINF), str(case.program)], timeout=30)
+    accepted = submission.returncode == 0
+    if accepted == case.should_accept:
+        decision = "accepted" if accepted else f"rejected (exit {submission.returncode})"
+        return True, f"correctly {decision}"
+
+    if accepted:
+        return False, "UNSOUND: accepted a program that type-errors at runtime"
+    detail = submission.stderr.strip() or submission.stdout.strip()
+    note = f"incorrectly rejected (exit {submission.returncode})"
+    return False, f"{note}: {detail}" if detail else note
 
 
-def expect_type_errors(path: Path) -> None:
-    """Ground truth for bad-* fixtures: must runtime-type-error on the host.
-    Raises VerifierError if the fixture itself is broken."""
-    hrc, hout, herr = host_eval(path)
-    if hrc == 0:
-        raise VerifierError(f"fixture {path.name} is labeled bad but the host accepted it")
-    if not is_type_error(herr, hout):
-        raise VerifierError(
-            f"fixture {path.name} is labeled bad but failed without a type error (rc={hrc}):\n{herr}\n{hout}"
-        )
-
-
-def grade_ok(path: Path) -> tuple[float, str]:
-    expect_runs_clean(path)
-    rc, out, err = typeinf(path)
-    if rc != 0:
-        return 0.0, f"rejected (exit {rc}): {err.strip() or out.strip()}"
-    return 1.0, "accept ok"
-
-
-def grade_bad(path: Path) -> tuple[bool, str]:
-    """Return (passed, note). passed means correctly rejected."""
-    expect_type_errors(path)
-    rc, out, err = typeinf(path)
-    if rc != 0:
-        return True, f"correctly rejected (exit {rc})"
-    return False, "UNSOUND: accepted a program that type-errors at runtime"
-
-
-def grade_hard_ok(path: Path) -> tuple[float, str]:
-    name = path.name
-    if name == MCEVAL_SELF:
-        expect_runs_clean(MCEVAL)
-        rc, out, err = typeinf(MCEVAL)
-        if rc != 0:
-            return 0.0, f"reject mceval.scm: {err.strip() or out.strip()}"
-        return 1.0, "typed /app/mceval.scm"
-
-    load = name in MCEVAL_CLIENTS
-    expect_runs_clean(path, load_mceval=load)
-    if load:
-        rc, out, err = typeinf_with_mceval(path)
-    else:
-        rc, out, err = typeinf(path)
-    if rc != 0:
-        return 0.0, f"reject: {err.strip() or out.strip()}"
-    return 1.0, "hard-ok accepted"
-
-
-def write_reward(mean: float) -> None:
+def write_reward(reward: int) -> None:
     REWARD.parent.mkdir(parents=True, exist_ok=True)
-    REWARD.write_text(f"{mean:.6f}\n")
+    REWARD.write_text(f"{reward}\n")
 
 
 def main() -> int:
-    if not MINISCHEME.is_file():
-        print("missing /app/minischeme", file=sys.stderr)
-        write_reward(0.0)
-        return 1
-    if not TYPEINF.is_file():
-        print("missing /app/typeinf", file=sys.stderr)
-        write_reward(0.0)
-        return 1
-
-    oks = sorted(CHALLENGES.glob("ok-*.scm"))
-    bads = sorted(CHALLENGES.glob("bad-*.scm"))
-    hards = sorted(CHALLENGES.glob("hard-ok-*.scm"))
+    if not inputs_are_trusted():
+        write_reward(0)
+        return 0
 
     try:
-        print("=== bad (soundness gate: any miss → 0.0) ===")
-        bad_ok = True
-        for path in bads:
-            passed, note = grade_bad(path)
-            print(f"{path.name}: {'PASS' if passed else 'FAIL'} — {note}")
-            if not passed:
-                bad_ok = False
-        if not bad_ok:
-            print("bad-* miss → reward 0.0")
-            write_reward(0.0)
-            return 1
-
-        ok_scores: list[float] = []
-        print("=== ok (easy, 50%) ===")
-        for path in oks:
-            s, note = grade_ok(path)
-            print(f"{path.name}: score={s:.1f} — {note}")
-            ok_scores.append(s)
-
-        hard_scores: list[float] = []
-        print("=== hard-ok (hard, 50%) ===")
-        for path in hards:
-            s, note = grade_hard_ok(path)
-            print(f"{path.name}: score={s:.1f} — {note}")
-            hard_scores.append(s)
-    except VerifierError as e:
-        print(f"VERIFIER ERROR: {e}", file=sys.stderr)
+        with tempfile.TemporaryDirectory(prefix="scheme-typeinf-cases-") as tmp:
+            cases = assemble_cases(Path(tmp))
+            all_passed = True
+            print("=== grading all cases (all must pass) ===")
+            for case in cases:
+                passed, note = grade_case(case)
+                print(f"{case.name}: {'PASS' if passed else 'FAIL'} — {note}")
+                all_passed &= passed
+    except VerifierError as error:
+        print(f"VERIFIER ERROR: {error}", file=sys.stderr)
         return 1
 
-    easy_mean = sum(ok_scores) / len(ok_scores) if ok_scores else 0.0
-    hard_mean = sum(hard_scores) / len(hard_scores) if hard_scores else 0.0
-    mean = 0.5 * easy_mean + 0.5 * hard_mean
-
-    print(f"mean_score={mean:.4f} (easy={easy_mean:.4f} hard={hard_mean:.4f})")
-    write_reward(mean)
+    reward = int(all_passed)
+    print(f"reward={reward} ({'all cases passed' if reward else 'one or more cases failed'})")
+    write_reward(reward)
     return 0
 
 

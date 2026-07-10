@@ -5,7 +5,9 @@ language.
 
 The language is documented in `/app/Language.md`, there is a reference interpreter
 in OCaml in `/app/minischeme-src`, and this interpreter is compiled and ready to
-run at `/app/minischeme`.
+run at `/app/minischeme`. A MiniScheme metacircular interpreter is provided at
+`/app/mceval.scm` as a substantial example of the kind of program your type
+inference algorithm should support.
 
 You can run the interpreter in several ways. You can provide an expression
 on the command-line:
@@ -72,6 +74,8 @@ exit code if a type error may occur.
 The challenge is that the type inference algorithm that you design and
 implement must be flexible enough to support useful programs while still
 maintaining soundness. I will test it with some examples that are obviously
-well-typed, harder examples that involve heterogenous lists, and a metacircular
-interpreter. I will also test it on programs that do raise type errors, and
-admitting any program that raises a type error is unacceptable.
+well-typed and on harder examples that involve heterogenous lists. In particular,
+I will test whether it accepts the provided `/app/mceval.scm`, both by itself and
+when combined with clients that call the metacircular interpreter. I will also
+test it on programs that do raise type errors, and admitting any program that
+raises a type error is unacceptable.
