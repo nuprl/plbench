@@ -3,7 +3,7 @@ artifacts = []
 
 [task]
 name = "ilvm/ilvm-interpreter"
-description = "Implement an ILVM interpreter from Language.md"
+description = "Implement an interpreter for a small, WebAssembly-like virtual machine"
 keywords = ["programming-languages", "interpreter", "ilvm"]
 [[task.authors]]
 name = "Arjun Guha"
@@ -12,6 +12,7 @@ email = "a.guha@northeastern.edu"
 [metadata]
 category = "programming-languages"
 difficulty = "easy"
+vetted = true
 
 [verifier]
 timeout_sec = 600.0
@@ -24,5 +25,5 @@ network_mode = "public"
 build_timeout_sec = 900.0
 os = "linux"
 cpus = 2
-allow_internet = true
+allow_internet = false
 memory_mb = 2048
