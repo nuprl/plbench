@@ -386,6 +386,15 @@ def test_line_comments(ilvm: Path) -> None:
 
 
 def test_malloc_oom(ilvm: Path) -> None:
+    # malloc(1) is not executed just once: goto(0) restarts the block forever.
+    # Every iteration allocates a new one-word block, then overwrites r0 without
+    # freeing the block whose address it previously held.  Writing through r0
+    # changes that block's contents; it does not release the allocation.
+    #
+    # The memory limit is the total heap size in words, not a per-allocation
+    # limit.  Even with no CLI arguments, the argument layout reserves words 0
+    # and 1, so a 20-word heap leaves addresses 2..19 (18 words) for malloc.
+    # Thus the first 18 calls succeed and the 19th must report malloc OOM.
     r = run_ilvm(
         ilvm,
         """
