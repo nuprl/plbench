@@ -79,6 +79,19 @@ verifier, task contract, or reference implementations. Check both the final
 reward and the per-test verifier output; a plausible aggregate score can still
 hide a broken fixture or oracle bug.
 
+After a model earns a passing score, have a sub-agent independently audit the
+generated solution before treating the evaluation as successful. Give the
+sub-agent the task specification, the model's downloaded artifact and source,
+its trajectory, and the verifier results. Ask it to determine whether the
+solution implements a sound, general procedure for the specified problem or
+merely obtains the reward through shortcuts such as recognizing fixtures,
+hardcoding expected answers, bounded exploration where unbounded behavior is
+required, unsound abstractions, or exploitation of verifier gaps. The audit
+should explain the algorithm actually implemented, compare it with the task's
+semantics, and cite concrete evidence for its conclusion. Add adversarial
+tests when the inspection exposes an important case not already covered, then
+rerun Harbor and repeat the audit on the revised task.
+
 For example, this runs Codex on one task under Podman and downloads `/app` as
 an artifact:
 
@@ -90,4 +103,3 @@ harbor run -p tasks/scheme-typeinf -e podman -a codex -m openai/gpt-5.5 \
   --ae CODEX_FORCE_AUTH_JSON=true \
   --artifact /app
 ```
-
