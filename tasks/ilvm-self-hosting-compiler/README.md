@@ -1,43 +1,24 @@
-# nuprl/ilvm-self-hosting-compiler
+# Self-Hosting Compiler for MiniScheme using ILVM
 
-Agents write a MiniScheme-to-ILVM compiler in MiniScheme. The only deliverable
-is `/app/compiler.scm`.
+This task requires the agent to write a self-hosted compiler for MiniScheme that
+targets ILVM, which is a small, WebAssembly-like virtual machine. The agent
+receives a natural language specification of both languages, but no implementation.
+The agent may build its own interpreters or other development tools, but only
+the submitted compiler is graded.
 
-## Reference interpreters
 
-The verifier contains private reference interpreters for both languages:
+The verifier has reference interpreters for both MiniScheme and ILVM and
+several MiniScheme programs to test the compiler. We use each test program
+as follows:
 
-- `tests/minischeme_ref/` is an OCaml interpreter built with `ocamllex` and
-  `ocamlyacc`.
-- `tests/ilvm_ref/` is the repository's Rust reference ILVM interpreter.
-
-Neither implementation is copied into the agent environment. Comparing
-against both references prevents bugs in agent-written development tools from
-affecting the score.
-
-## Grading
-
-For each `.scm` program under `tests/examples/`, the verifier first runs the
-program with the reference MiniScheme interpreter. There are no hardcoded
-expected-output tables.
-
-The verifier then tests the submitted compiler two ways:
-
-1. **Direct:** interpret `compiler.scm` on the test source, then run the emitted
-   ILVM program.
-2. **Self-hosted:** interpret `compiler.scm` on its own source to obtain an ILVM
-   compiler, use that compiler on the test source, then run the emitted ILVM
-   program.
-
-Each result must have the same output and success-or-failure outcome as the
-reference MiniScheme run. The two pass rates contribute equally:
-
-```
-reward = 0.5 * direct + 0.5 * self_hosted
-```
-
-This is behavioral self-hosting. The generated compiler need not reproduce its
-own ILVM text byte-for-byte.
+1. We run it with the reference MiniScheme interpreter and record its behavior:
+   its standard output and whether it succeeds or fails.
+2. We compile it with the submitted compiler, which we run using our reference
+   MiniScheme interpreter. We run the output program with the reference ILVM
+   interpreter. We compare its behavior with the expected behavior from (1).
+3. We have the submitted compiler compile itself to ILVM, using the reference
+   interpreter to bootstrap. We then compile each test program to ILVM using
+   this MiniScheme compiler (in ILVM) and compare its behavior with (1).
 
 ## Oracle
 
