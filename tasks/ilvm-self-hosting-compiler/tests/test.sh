@@ -10,6 +10,14 @@ cd /tests/ilvm_ref
 cargo build --release --quiet
 cd -
 
+# Build the trusted MiniScheme interpreter from its ocamllex/ocamlyacc sources.
+# These tools are part of the OCaml package installed in the task image.
+cd /tests/minischeme_ref
+ocamlyacc parser.mly
+ocamllex lexer.mll
+ocamlc -o minischeme ast.ml parser.mli parser.ml lexer.ml interp.ml main.ml
+cd -
+
 # test_suite.py writes /logs/verifier/reward.txt itself on every normal
 # scoring outcome, and deliberately does NOT write it (raising instead) if
 # a fixture/reference-implementation problem is detected — that should

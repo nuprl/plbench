@@ -790,10 +790,14 @@ class Compiler:
         e.emit("    }")
         e.emit("}")
         e.start_block(bool_false_label)
+        e.emit("r24 = 35;")  # '#'
+        self._append_char("r24")
         e.emit("r24 = 102;")  # 'f'
         self._append_char("r24")
         e.emit(f"goto(@{done_label});")
         e.start_block(bool_true_label)
+        e.emit("r24 = 35;")  # '#'
+        self._append_char("r24")
         e.emit("r24 = 116;")  # 't'
         self._append_char("r24")
         e.emit(f"goto(@{done_label});")

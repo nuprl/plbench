@@ -1,41 +1,21 @@
 #!/usr/bin/env python3
-"""Grade /app/compiler.scm + /app/compiler.ilvm: a self-hosting MiniScheme-to-
-ILVM compiler.
+"""Grade a MiniScheme-to-ILVM compiler in two passes.
 
-We grade against our OWN reference ILVM implementation (tests/ilvm_ref,
-built by test.sh before this runs), never the agent's own ILVM tooling — the
-agent is never shown this implementation. This decouples "is the compiler
-correct" from "is the agent's own ILVM interpreter correct."
+The submission is one MiniScheme program, /app/compiler.scm. For each example:
 
-Two independent sub-scores, each averaged over tests/examples/*.scm:
+1. Run compiler.scm with the trusted MiniScheme interpreter, then run the ILVM
+   it emits. This measures compiler correctness without requiring bootstrap.
+2. Ask compiler.scm to compile itself, run that generated ILVM compiler on the
+   same example, and run its output. This measures self-hosting.
 
-  correctness:   compiling with compiler.ilvm and running the result
-                 produces the expected output (EXPECTED below — a ground
-                 truth computed independently of any agent artifact).
-  self_hosting:  compiler.ilvm recompiles compiler.scm into compiler2.ilvm;
-                 compiling+running each example with compiler.ilvm and with
-                 compiler2.ilvm must produce identical, successful results.
+Both results must match the trusted MiniScheme interpreter's behavior on the
+example. Each pass contributes half of the reward.
 
-reward = 0.5 * correctness + 0.5 * self_hosting. No hard gate zeroes the
-whole score on one failure — the example battery mixes easy and hard
-programs so partial credit is informative.
-
---- The one, clearly-documented oracle escape hatch ---
-
-Our own bundled oracle (solution/) is NOT self-hosting: it's a real
-compiler, but written in Python, not in MiniScheme (see README.md for why).
-To grade honestly instead of faking a fake compiler.ilvm, compiler.scm
-carries a long, non-guessable marker string (ORACLE_MARKER below). If a
-submission's compiler.scm contains that exact marker:
-  - self_hosting is scored 0.0 outright (not skipped, not free credit —
-    this submission has admitted it isn't self-hosting).
-  - correctness is graded by invoking FALLBACK_COMPILER (a real compiler
-    dropped next to it by solve.sh, at a fixed path under /app) instead of
-    running compiler.ilvm.
-This is the ONLY special-cased branch in this file; there is no other path
-by which compiler.ilvm is bypassed. See README.md for the associated risk
-(a real agent that discovers this exact string gets the oracle's
-correctness score for free) and why we accepted it anyway.
+The bundled oracle is deliberately written in Python rather than MiniScheme.
+Its marker selects the fallback compiler in run_source_compiler, the only
+oracle-specific execution path. It passes the first stage; compiling its
+MiniScheme stub produces an aborting compiler, so it earns no self-hosting
+credit.
 """
 
 from __future__ import annotations
@@ -44,98 +24,99 @@ import re
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 ILVM_REF = Path("/tests/ilvm_ref/target/release/ilvm")
+MINISCHEME_REF = Path("/tests/minischeme_ref/minischeme")
 COMPILER_SCM = Path("/app/compiler.scm")
-COMPILER_ILVM = Path("/app/compiler.ilvm")
 FALLBACK_COMPILER = Path("/app/.oracle_fallback_compiler.py")
 EXAMPLES = Path("/tests/examples")
 REWARD = Path("/logs/verifier/reward.txt")
 
-MEM = "4000000"
-REGS = "64"
-
-STATUS_RE = re.compile(r"^Normal termination\. Result = -?\d+$")
-
 ORACLE_MARKER = "ORACLE-NOT-SELF-HOSTING-7f3ac9e1d4b8407e9c2a1f6e5d0b8c33"
-
-# Hand-verified against environment/Scheme.md's semantics — independent of
-# anything the agent produced. Each display call terminates its output with a
-# newline.
-EXPECTED = {
-    "01-arith.scm": "12\n",
-    "02-factorial.scm": "120\n",
-    "03-fibonacci.scm": "55\n",
-    "04-list-sum.scm": "15\n",
-    "05-strings.scm": "hello, world\n",
-    "06-classify.scm": "negative\nzero\npositive\n",
-    "07-closures-map.scm": "30\n",
-    "08-let.scm": "31\n",
-    "09-letrec-mutual.scm": "t\n",
-    "10-vector.scm": "20\n",
-}
+STATUS_RE = re.compile(r"^Normal termination\. Result = -?\d+$")
 
 
 class VerifierError(Exception):
-    """A verifier-side problem (missing reference implementation, broken
-    fixture) — not something to hold against the agent."""
+    """The verifier or one of its private fixtures is broken."""
 
 
-def strip_status(stdout: str) -> str:
-    """Remove the reference implementation's own trailing status line
-    ("Normal termination. Result = N"), recovering the program's own
-    print/print_str output."""
+@dataclass(frozen=True)
+class Result:
+    ok: bool
+    output: str = ""
+
+
+FAILED = Result(False)
+
+
+def strip_ilvm_status(stdout: str) -> str:
+    """Remove the reference ILVM interpreter's termination-status line."""
     body = stdout[:-1] if stdout.endswith("\n") else stdout
-    head, _, last = body.rpartition("\n")
-    if STATUS_RE.match(last):
-        return head + "\n" if head else ""
+    output, _, status = body.rpartition("\n")
+    if STATUS_RE.match(status):
+        return output + "\n" if output else ""
     return stdout
 
 
-def run_ilvm(program_text: str, arg: str | None, timeout: float) -> tuple[bool, str]:
-    """Run program_text under the reference ILVM implementation, optionally
-    with one command-line argument. Returns (succeeded, own_stdout)."""
-    with tempfile.NamedTemporaryFile("w", suffix=".ilvm", delete=False) as f:
-        f.write(program_text)
-        prog_path = f.name
-    try:
-        cmd = [str(ILVM_REF), "-m", MEM, "-r", REGS, prog_path]
-        if arg is not None:
-            cmd += ["-l", arg]
-        try:
-            completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return False, ""
-    finally:
-        Path(prog_path).unlink(missing_ok=True)
-    if completed.returncode != 0:
-        return False, ""
-    return True, strip_status(completed.stdout)
-
-
-def compile_with(compiler_ilvm_text: str, source_text: str) -> tuple[bool, str]:
-    """Run a compiler (as ILVM source text) on source_text; returns
-    (succeeded, compiled_ilvm_text)."""
-    return run_ilvm(compiler_ilvm_text, source_text, timeout=60)
-
-
-def compile_with_fallback(source_text: str) -> tuple[bool, str]:
-    """Compile source_text using the oracle's real (non-self-hosting)
-    Python compiler, invoked as an external process."""
+def run_process(command: list[str], timeout: int, stdin: str | None = None) -> Result:
     try:
         completed = subprocess.run(
-            [sys.executable, str(FALLBACK_COMPILER)],
-            input=source_text,
+            command,
+            input=stdin,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return False, ""
-    if completed.returncode != 0:
-        return False, ""
-    return True, completed.stdout
+        return FAILED
+    return Result(completed.returncode == 0, completed.stdout)
+
+
+def run_minischeme(program: Path, args: list[str]) -> Result:
+    return run_process([str(MINISCHEME_REF), str(program), *args], timeout=60)
+
+
+def run_ilvm(program_text: str, args: list[str]) -> Result:
+    with tempfile.NamedTemporaryFile("w", suffix=".ilvm", delete=False) as file:
+        file.write(program_text)
+        program = Path(file.name)
+    try:
+        command = [str(ILVM_REF), "-m", "4000000", "-r", "64", str(program)]
+        for arg in args:
+            command.extend(["-l", arg])
+        result = run_process(command, timeout=60)
+    finally:
+        program.unlink(missing_ok=True)
+    return Result(result.ok, strip_ilvm_status(result.output))
+
+
+def run_source_compiler(source_text: str, is_oracle: bool) -> Result:
+    """Compile source_text with compiler.scm, or with the admitted oracle."""
+    if is_oracle:
+        return run_process(
+            [sys.executable, str(FALLBACK_COMPILER)],
+            timeout=30,
+            stdin=source_text,
+        )
+    return run_minischeme(COMPILER_SCM, [source_text])
+
+
+def run_ilvm_compiler(compiler: Result, source_text: str) -> Result:
+    if not compiler.ok:
+        return FAILED
+    return run_ilvm(compiler.output, [source_text])
+
+
+def run_compiled_program(compiled: Result) -> Result:
+    if not compiled.ok:
+        return FAILED
+    return run_ilvm(compiled.output, [])
+
+
+def same_behavior(expected: Result, actual: Result) -> bool:
+    return expected.ok == actual.ok and expected.output == actual.output
 
 
 def write_reward(reward: float) -> None:
@@ -145,104 +126,69 @@ def write_reward(reward: float) -> None:
 
 def main() -> int:
     if not ILVM_REF.is_file():
-        raise VerifierError(f"reference ILVM implementation not built at {ILVM_REF}")
-
+        raise VerifierError(f"missing reference ILVM interpreter: {ILVM_REF}")
+    if not MINISCHEME_REF.is_file():
+        raise VerifierError(f"missing reference MiniScheme interpreter: {MINISCHEME_REF}")
     if not COMPILER_SCM.is_file():
         print("missing /app/compiler.scm", file=sys.stderr)
-        write_reward(0.0)
-        return 1
-    if not COMPILER_ILVM.is_file():
-        print("missing /app/compiler.ilvm", file=sys.stderr)
         write_reward(0.0)
         return 1
 
     examples = sorted(EXAMPLES.glob("*.scm"))
     if not examples:
-        raise VerifierError("no example programs found under /tests/examples")
-    missing_expected = [p.name for p in examples if p.name not in EXPECTED]
-    if missing_expected:
-        raise VerifierError(f"no EXPECTED entry for: {missing_expected}")
+        raise VerifierError(f"no MiniScheme examples in {EXAMPLES}")
 
-    compiler_scm_text = COMPILER_SCM.read_text()
-    is_oracle = ORACLE_MARKER in compiler_scm_text
+    compiler_source = COMPILER_SCM.read_text()
+    is_oracle = ORACLE_MARKER in compiler_source
+    if is_oracle and not FALLBACK_COMPILER.is_file():
+        raise VerifierError(f"oracle fallback is missing: {FALLBACK_COMPILER}")
 
-    if is_oracle:
-        print("=== ORACLE_MARKER found in compiler.scm ===")
-        print("This submission admits it is not self-hosting.")
-        print("self_hosting is scored 0.0; correctness is graded via the")
-        print(f"fallback compiler at {FALLBACK_COMPILER}, not compiler.ilvm.")
-        if not FALLBACK_COMPILER.is_file():
-            raise VerifierError(
-                f"ORACLE_MARKER present but {FALLBACK_COMPILER} is missing"
-            )
+    self_hosted_compiler = run_source_compiler(compiler_source, is_oracle)
+    if not self_hosted_compiler.ok:
+        print("compiler.scm failed to compile itself; self-hosting cases will fail")
 
-        correctness_scores: list[float] = []
-        print("=== per-example results (fallback compiler) ===")
-        for path in examples:
-            name = path.name
-            source = path.read_text()
-            expected = EXPECTED[name]
-            ok1, out1_ilvm = compile_with_fallback(source)
-            ran1, actual1 = run_ilvm(out1_ilvm, None, timeout=30) if ok1 else (False, "")
-            correct = ran1 and actual1 == expected
-            correctness_scores.append(1.0 if correct else 0.0)
-            print(f"{name}: correctness={'PASS' if correct else 'FAIL'}")
-            if not correct:
-                print(f"  compiled ok={ok1} ran ok={ran1} expected={expected!r} actual={actual1!r}")
-
-        correctness = sum(correctness_scores) / len(correctness_scores)
-        self_hosting = 0.0
-        reward = 0.5 * correctness + 0.5 * self_hosting
-        print(f"correctness={correctness:.4f} self_hosting={self_hosting:.4f} reward={reward:.4f}")
-        write_reward(reward)
-        return 0
-
-    compiler_ilvm_text = COMPILER_ILVM.read_text()
-
-    print("=== self-hosting fixed point: compiling compiler.scm with compiler.ilvm ===")
-    ok2, compiler2_ilvm_text = compile_with(compiler_ilvm_text, compiler_scm_text)
-    if ok2:
-        print("compiler.ilvm compiled compiler.scm successfully -> compiler2.ilvm")
-    else:
-        print("compiler.ilvm FAILED to compile compiler.scm -- every self-hosting case below will fail")
-
-    correctness_scores = []
-    self_hosting_scores: list[float] = []
-
+    direct_passes = 0
+    self_hosted_passes = 0
     print("=== per-example results ===")
-    for path in examples:
-        name = path.name
-        source = path.read_text()
-        expected = EXPECTED[name]
 
-        ok1, out1_ilvm = compile_with(compiler_ilvm_text, source)
-        ran1, actual1 = run_ilvm(out1_ilvm, None, timeout=30) if ok1 else (False, "")
+    for example in examples:
+        source = example.read_text()
+        expected = run_minischeme(example, [])
 
-        correct = ran1 and actual1 == expected
-        correctness_scores.append(1.0 if correct else 0.0)
+        direct_program = run_source_compiler(source, is_oracle)
+        direct_result = run_compiled_program(direct_program)
+        direct_ok = direct_program.ok and same_behavior(expected, direct_result)
+        direct_passes += int(direct_ok)
 
-        if ok2:
-            ok2b, out2_ilvm = compile_with(compiler2_ilvm_text, source)
-            ran2, actual2 = run_ilvm(out2_ilvm, None, timeout=30) if ok2b else (False, "")
-        else:
-            ran2, actual2 = False, ""
-        self_hosts = ran1 and ran2 and actual1 == actual2
-        self_hosting_scores.append(1.0 if self_hosts else 0.0)
+        self_hosted_program = run_ilvm_compiler(self_hosted_compiler, source)
+        self_hosted_result = run_compiled_program(self_hosted_program)
+        self_hosted_ok = (
+            self_hosted_compiler.ok
+            and self_hosted_program.ok
+            and same_behavior(expected, self_hosted_result)
+        )
+        self_hosted_passes += int(self_hosted_ok)
 
         print(
-            f"{name}: correctness={'PASS' if correct else 'FAIL'} "
-            f"self-hosting={'PASS' if self_hosts else 'FAIL'}"
+            f"{example.name}: "
+            f"direct={'PASS' if direct_ok else 'FAIL'} "
+            f"self-hosted={'PASS' if self_hosted_ok else 'FAIL'}"
         )
-        if not correct:
-            print(f"  compiled ok={ok1} ran ok={ran1} expected={expected!r} actual={actual1!r}")
-        if not self_hosts:
-            print(f"  compiler.ilvm run={ran1} actual={actual1!r} vs compiler2.ilvm run={ran2} actual={actual2!r}")
+        if not direct_ok:
+            print(f"  expected={expected} direct={direct_result}")
+        if not self_hosted_ok:
+            print(f"  expected={expected} self-hosted={self_hosted_result}")
 
-    correctness = sum(correctness_scores) / len(correctness_scores)
-    self_hosting = sum(self_hosting_scores) / len(self_hosting_scores)
-    reward = 0.5 * correctness + 0.5 * self_hosting
+    count = len(examples)
+    direct_score = direct_passes / count
+    self_hosted_score = self_hosted_passes / count
+    reward = 0.5 * direct_score + 0.5 * self_hosted_score
 
-    print(f"correctness={correctness:.4f} self_hosting={self_hosting:.4f} reward={reward:.4f}")
+    print(
+        f"direct={direct_score:.4f} "
+        f"self_hosted={self_hosted_score:.4f} "
+        f"reward={reward:.4f}"
+    )
     write_reward(reward)
     return 0
 
