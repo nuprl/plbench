@@ -19,8 +19,12 @@ e ::= n | true | false | x
     | (e)
 ```
 
-`n` is a possibly negative decimal integer. Identifiers begin with an ASCII
-letter or underscore and continue with letters, digits, or underscores.
+`n` is a possibly negative decimal integer. As a recommendation to avoid
+pointless differences between integer representations, programs for this task
+keep integer literals between `-100` and `100`; implementations need not check
+this range and may represent integers however they like. Identifiers begin
+with an ASCII letter or underscore and continue with letters, digits, or
+underscores.
 Whitespace is insignificant. A comment begins with `//` and continues to the
 end of its line.
 

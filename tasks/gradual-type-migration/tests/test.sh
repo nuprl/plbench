@@ -2,4 +2,6 @@
 set -euo pipefail
 
 mkdir -p /logs/verifier
-python3 /tests/test_suite.py
+eval "$(opam env --switch=system)"
+cd /tests
+dune exec ./verifier.exe

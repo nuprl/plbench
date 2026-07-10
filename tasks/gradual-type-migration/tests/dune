@@ -1,0 +1,20 @@
+(ocamllex lexer)
+
+(menhir
+ (modules gtlc_parser))
+
+(executable
+ (name verifier)
+ (modules
+  syntax
+  gtlc_parser
+  lexer
+  parser
+  semantics
+  fixtures
+  command
+  migration
+  verifier)
+ (libraries str unix yaml)
+ (preprocess
+  (pps ppx_deriving_yaml)))

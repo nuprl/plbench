@@ -1,5 +1,0 @@
-(fun h : any -> any -> any .
-  (fun x : any -> any . h (x x)) (fun x : any . h x x))
-  (fun e : any . fun m : any . m (fun x : any . x)
-    (fun m : any . fun n : any . e m (e n))
-    (fun m : any . fun v : any . e (m v)))

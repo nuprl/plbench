@@ -1,3 +1,0 @@
-(fun b : (any -> any) -> (any -> int) -> any -> int .
-  b (fun c : any . (fun x : any . x x) 5 5) (fun d : any . 0))
-  (fun t : any -> any . fun f : any -> int . f)

@@ -1,2 +1,0 @@
-(fun f : any -> int . f true + (fun g : any -> int . g 5) f)
-  (fun x : any . 5)

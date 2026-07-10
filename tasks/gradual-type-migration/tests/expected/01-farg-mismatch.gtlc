@@ -1,1 +1,0 @@
-(fun f : bool -> int . f true) (fun x : bool . (x : any) + 100)

@@ -1,1 +1,0 @@
-(fun f : any -> int . (fun y : int . f) (f 5)) (fun x : any . 10 + x)

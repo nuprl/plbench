@@ -13,6 +13,8 @@ type annotations. On success, print exactly one migrated program to standard
 output and exit with status 0. Diagnostic text may be printed to standard
 error.
 
+Z3 4.8.12 is installed in the environment and available as `z3`.
+
 The migrated program must:
 
 1. parse in the language from `/app/Language.md`;
@@ -25,11 +27,3 @@ The migrated program must:
    divergence in every well-typed context that receives the program at type
    `any`; and
 6. subject to compatibility, make the annotations as precise as possible.
-
-The verifier checks the repository's gradual-type-migration challenge suite.
-It validates syntax, structure, annotation completeness, typing, and result
-type precision with a trusted implementation. It then tests compatibility in
-the empty context, in challenge-specific higher-order contexts, and in a broad
-set of generated calling contexts. A migration that fails one of these checks
-receives no credit for that challenge. Among valid compatible migrations,
-precision is scored independently at lambda annotation positions.

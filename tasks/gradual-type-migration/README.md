@@ -1,11 +1,13 @@
 # plbench/gradual-type-migration
 
 Implement safe, compatible, and precise gradual type migration for a compact
-gradually typed lambda calculus. Unlike `tasks/typewhich`, this task does not
-provide or ask agents to modify TypeWhich: the migration algorithm is built
-from scratch against a standalone language specification.
+gradually typed lambda calculus. Agents build their migration algorithm from
+scratch against the standalone language specification.
 
-The private verifier contains its own parser, cast elaborator, guarded
-interpreter, structural checker, generated contextual tests, and compatible
-reference migrations. The 22 challenge programs are the TypeWhich adversarial
-and Migeed--Palsberg suites.
+The private verifier is an OCaml/Dune project with an ocamllex lexer, Menhir
+parser, gradual semantics, and migration-precision checker. One typed YAML
+document contains the challenge programs, optional TypeWhich witness contexts,
+and curated maximally precise compatible migrations. A submission must
+type-check and lie below at least one compatible maximum; no reference tool is
+run during grading. The 22 challenge programs are the TypeWhich adversarial and
+Migeed--Palsberg suites.

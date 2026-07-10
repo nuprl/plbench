@@ -1,1 +1,0 @@
-fun f : any . f (f true)

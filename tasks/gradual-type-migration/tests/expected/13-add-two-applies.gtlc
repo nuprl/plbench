@@ -1,1 +1,0 @@
-fun x : any . x 4 + x true
