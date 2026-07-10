@@ -209,7 +209,8 @@ BUILTIN_NAMES = {
 class Compiler:
     def __init__(self):
         self.e = Emitter()
-        self.globals: dict[str, int] = {}  # Sym name or "__str__N" -> index
+        # argv is a predefined global populated from ILVM's argument area.
+        self.globals: dict[str, int] = {"argv": 0}  # Sym name or "__str__N" -> index
         self.string_slot: dict[str, str] = {}  # text -> global key
         self.pending: list[tuple[str, list, list, list]] = []
         # (entry_label, params, body_expr, captured_scopes)
@@ -756,11 +757,8 @@ class Compiler:
         # Every ifz/else must be the terminal instruction of its own block
         # (no goto allowed after it) -- so every branch, including nested
         # ones, gets its own block that ends in a plain goto. Output is
-        # appended to a shared buffer (r17/r18), not printed immediately:
-        # ILVM's print/print_str always append their own newline, so
-        # printing per-display would insert spurious newlines between
-        # consecutive display calls. The buffer is flushed with a single
-        # print_str at the very end of the program.
+        # appended to a shared buffer (r17/r18), which is flushed at the end
+        # of the program.
         e = self.e
         e.emit(f"r20 = *{reg};")
         int_label = e.fresh_label("disp_int")
@@ -803,6 +801,8 @@ class Compiler:
         self._append_string_cell(reg)
         e.emit(f"goto(@{done_label});")
         e.start_block(done_label)
+        e.emit("r24 = 10;")
+        self._append_char("r24")
 
 
 def push(e: Emitter, reg: str) -> None:
@@ -843,6 +843,104 @@ def compile_program(text: str) -> str:
     e.emit("r6 = r5 + 1;")
     e.emit("*r6 = 0;")
     e.emit(f"r8 = malloc({max(len(c.globals), 1)});")
+
+    # Translate ILVM's packed command-line argument area into a MiniScheme
+    # vector of boxed strings. ILVM places the argument count at heap[1] and
+    # pointers to packed strings at heap[2..].
+    e.emit("r30 = *1;")
+    e.emit("r29 = r30 + 2;")
+    e.emit("r31 = malloc(r29);")
+    e.emit(f"*r31 = {TAG_VEC};")
+    e.emit("r29 = r31 + 1;")
+    e.emit("*r29 = r30;")
+    e.emit("r32 = 0;")
+    e.emit("goto(@argv_loop);")
+
+    e.start_block("argv_loop")
+    e.emit("r29 = r32 < r30;")
+    e.emit("ifz r29 {")
+    e.emit("    goto(@argv_ready);")
+    e.emit("} else {")
+    e.emit("    goto(@argv_scan_init);")
+    e.emit("}")
+
+    e.start_block("argv_scan_init")
+    e.emit("r33 = r32 + 2;")
+    e.emit("r34 = *r33;")
+    e.emit("r35 = 0;")  # string length in bytes
+    e.emit("r36 = 0;")  # packed-word offset
+    e.emit("r37 = 0;")  # byte offset within word
+    e.emit("goto(@argv_scan_byte);")
+
+    e.start_block("argv_scan_byte")
+    e.emit("r38 = r34 + r36;")
+    e.emit("r39 = *r38;")
+    e.emit("r40 = 3 - r37;")
+    e.emit("r40 = r40 * 8;")
+    e.emit("r41 = r39 >> r40;")
+    e.emit("r41 = r41 & 255;")
+    e.emit("ifz r41 {")
+    e.emit("    goto(@argv_alloc_string);")
+    e.emit("} else {")
+    e.emit("    goto(@argv_scan_continue);")
+    e.emit("}")
+
+    e.start_block("argv_scan_continue")
+    e.emit("r35 = r35 + 1;")
+    e.emit("r37 = r37 + 1;")
+    e.emit("r42 = r37 == 4;")
+    e.emit("ifz r42 {")
+    e.emit("    goto(@argv_scan_byte);")
+    e.emit("} else {")
+    e.emit("    goto(@argv_scan_next_word);")
+    e.emit("}")
+
+    e.start_block("argv_scan_next_word")
+    e.emit("r36 = r36 + 1;")
+    e.emit("r37 = 0;")
+    e.emit("goto(@argv_scan_byte);")
+
+    e.start_block("argv_alloc_string")
+    e.emit("r43 = r35 + 4;")
+    e.emit("r43 = r43 / 4;")
+    e.emit("r29 = r43 + 2;")
+    e.emit("r44 = malloc(r29);")
+    e.emit(f"*r44 = {TAG_STRING};")
+    e.emit("r29 = r44 + 1;")
+    e.emit("*r29 = r35;")
+    e.emit("r45 = 0;")
+    e.emit("goto(@argv_copy_loop);")
+
+    e.start_block("argv_copy_loop")
+    e.emit("r29 = r45 < r43;")
+    e.emit("ifz r29 {")
+    e.emit("    goto(@argv_store_string);")
+    e.emit("} else {")
+    e.emit("    goto(@argv_copy_word);")
+    e.emit("}")
+
+    e.start_block("argv_copy_word")
+    e.emit("r46 = r34 + r45;")
+    e.emit("r47 = *r46;")
+    e.emit("r48 = r44 + 2;")
+    e.emit("r48 = r48 + r45;")
+    e.emit("*r48 = r47;")
+    e.emit("r45 = r45 + 1;")
+    e.emit("goto(@argv_copy_loop);")
+
+    e.start_block("argv_store_string")
+    e.emit("r29 = r31 + 2;")
+    e.emit("r29 = r29 + r32;")
+    e.emit("*r29 = r44;")
+    e.emit("r32 = r32 + 1;")
+    e.emit("goto(@argv_loop);")
+
+    e.start_block("argv_ready")
+    e.emit(f"r29 = r8 + {c.globals['argv']};")
+    e.emit("*r29 = r31;")
+    e.emit("goto(@runtime_literals);")
+
+    e.start_block("runtime_literals")
     for text_lit, key in c.string_slot.items():
         idx = c.globals[key]
         words = pack_words(text_lit)
@@ -875,6 +973,16 @@ def compile_program(text: str) -> str:
         e.emit(f"goto(@toplevel_{i + 1});")
 
     e.start_block(f"toplevel_{len(forms)}")
+    e.emit("ifz r18 {")
+    e.emit("    goto(@exit_no_output);")
+    e.emit("} else {")
+    e.emit("    goto(@flush_prepare);")
+    e.emit("}")
+
+    e.start_block("flush_prepare")
+    # The buffered output ends in the newline supplied by the last display.
+    # Remove it because ILVM's print_str supplies that final newline itself.
+    e.emit("r18 = r18 - 1;")
     e.emit("r210 = r18 + 4;")
     e.emit("r210 = r210 / 4;")
     e.emit("r211 = r210 + 2;")
@@ -926,6 +1034,9 @@ def compile_program(text: str) -> str:
     e.start_block("flush_finish")
     e.emit("r225 = r212 + 2;")
     e.emit("print_str(r225);")
+    e.emit("exit(0);")
+
+    e.start_block("exit_no_output")
     e.emit("exit(0);")
 
     idx = 0

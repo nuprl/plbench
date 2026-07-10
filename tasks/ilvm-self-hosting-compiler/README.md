@@ -10,25 +10,10 @@ exactly two files:
 | `/app/compiler.scm` | The compiler's own source, in MiniScheme |
 | `/app/compiler.ilvm` | `compiler.scm`, compiled to ILVM by the agent's own compiler |
 
-This replaces an earlier version of this task that asked for a compiler
-*from* ILVM *to* native machine code, written *in* ILVM. That design turned
-out to be unsatisfiable: ILVM's only output primitives (`print`, `print_str`,
-`print(array(...))`) can only emit decimal numbers and ASCII text —
-`print_str` is specified to *abort* on any non-ASCII byte — so there is no
-way for an ILVM program to emit the raw bytes of a native (e.g. ELF) binary.
-The old oracle solution "solved" this by cheating (emitting shell-script
-wrappers tagged with a marker string that the verifier special-cased around),
-which was itself a real integrity hole: nothing tied that marker to the
-oracle specifically, so any agent that discovered it could claim reward 1.0
-without solving anything.
-
-The current design (Scheme → ILVM, not ILVM → native) doesn't have the
-unsatisfiability problem: ILVM programs are themselves textual source, so
-"emit an ILVM program as output" is just "print some ASCII text," which is
-squarely within what `print`/`print_str` can do — a real agent really can
-write a real, self-hosting compiler for this. Our own oracle still doesn't
-attempt to (see below), but that's a deliberate, transparent shortcut, not
-a symptom of the task being unsolvable.
+ILVM programs are textual source, so a MiniScheme compiler can emit them
+using ILVM's ASCII output primitives. This makes it possible for an agent to
+write a real, self-hosting compiler. The oracle does not attempt to
+self-host (see below); it provides transparent partial credit instead.
 
 ## Why grade against a private reference ILVM implementation
 
@@ -66,12 +51,7 @@ battery of test programs under `tests/examples/`:
   `Scheme.md`'s semantics, hardcoded in `EXPECTED` — this is ground truth
   computed independently of any agent artifact, so a bug in a test fixture
   can't masquerade as an agent failure the way it did in `scheme-typeinf`
-  before that was fixed). Each expected value ends with one extra trailing
-  newline beyond what the source's own `display` calls produce: ILVM's
-  `print`/`print_str` each append their own newline, so a correct compiler
-  must buffer all `display` output and flush it with a single `print_str`
-  call at the very end of the compiled program — printing per-`display`
-  would insert spurious newlines between consecutive calls.
+  before that was fixed).
 - **self-hosting**: fraction of the same test programs for which
   `compiler.ilvm` and `compiler2.ilvm` (see above) agree.
 
@@ -114,12 +94,9 @@ used elsewhere in this repo (e.g. `typewhich`, `scheme-typeinf`), just
 achieved through an admitted-non-self-hosting compiler rather than a
 feature-limited one.
 
-**Known risk, accepted deliberately:** unlike the old ELF-marker hack, this
-marker doesn't bypass any check that a real agent's submission depends on —
-a real agent still has to actually build a working, self-hosting compiler to
-score well. But if a real agent ever discovers this exact marker string
-(e.g. by having seen this repository) and pastes it into `compiler.scm`, it
-gets the oracle's full `0.5` reward for free, without building anything.
-We chose a long, effectively non-guessable token specifically to make
+**Known risk, accepted deliberately:** if a real agent discovers the exact
+oracle marker string (e.g. by having seen this repository) and pastes it into
+`compiler.scm`, it gets the oracle's full `0.5` reward without building
+anything. The marker is a long, effectively non-guessable token, making
 accidental collisions astronomically unlikely; the residual risk is
 deliberate reuse by an agent that has seen this file.

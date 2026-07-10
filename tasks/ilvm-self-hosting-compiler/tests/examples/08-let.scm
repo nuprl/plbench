@@ -3,4 +3,3 @@
     (+ s 1)))
 
 (display (bump-sum 10 20))
-(display "\n")

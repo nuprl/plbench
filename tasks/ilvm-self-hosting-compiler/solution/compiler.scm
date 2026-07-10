@@ -6,4 +6,4 @@
 ; that /app/compiler.scm is present per the task's contract, and carries
 ; the marker above that tells the verifier to grade this submission via
 ; the fallback compiler instead of compiler.ilvm.
-(define (main src) (error "this oracle is not self-hosting"))
+(error "this oracle is not self-hosting")

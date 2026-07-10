@@ -22,27 +22,22 @@ Install both of the following:
 /app/compiler.ilvm   # compiler.scm, compiled to ILVM by your own compiler
 ```
 
-`compiler.scm` must be a well-formed MiniScheme program that defines a
-top-level function `main` taking exactly one argument: a MiniScheme string
-holding the complete source text of a MiniScheme program. Calling `main`
-on that string must `display` the complete source text of an equivalent
-ILVM program — one that, when run, behaves like the input program would
-under MiniScheme's semantics. `compiler.ilvm` must be the result of
-compiling `compiler.scm` with your own compiler: it must itself correctly
-implement everything `compiler.scm` specifies, as an ILVM program.
+`compiler.scm` must be a well-formed MiniScheme program. When the compiler is
+run, it receives exactly one command-line argument: the complete source text
+of a MiniScheme program, available as `(vector-ref argv 0)`. The compiler must
+`display` the complete source text of an equivalent ILVM program — one that,
+when run, behaves like the input program would under MiniScheme's semantics.
+`compiler.ilvm` must be the result of compiling `compiler.scm` with your own
+compiler: it must itself correctly implement everything `compiler.scm`
+specifies, as an ILVM program.
 
-This calling convention applies to every program your compiler compiles,
-not just `compiler.scm` itself:
+Every compiled program must expose its command-line arguments through
+MiniScheme's predefined `argv` variable as specified in `/app/Scheme.md`.
+`/app/ILVM.md` describes how those arguments are supplied to and represented
+by the ILVM interpreter.
 
-- If the source program defines a top-level `main` taking one argument,
-  and the compiled ILVM program is run with exactly one command-line
-  argument, the compiled program must behave as if `(main ARG)` were
-  evaluated as one more top-level form, where `ARG` is that command-line
-  argument packed as a MiniScheme string (see `/app/ILVM.md` for how ILVM
-  programs receive command-line arguments).
-- If the source program has no `main`, or the compiled program is run
-  with no arguments, it just runs its top-level forms in order, same as
-  any other MiniScheme program.
+In addition:
+
 - A MiniScheme runtime error — whether from the `error` builtin or from a
   runtime type error as defined in `/app/Scheme.md` (e.g. `(car '())`) —
   must compile to an ILVM `abort;`. This is the only failure signal: there
@@ -50,17 +45,9 @@ not just `compiler.scm` itself:
   ILVM implementation's own process exits with a nonzero status when the
   program it's running aborts, and with status 0 for any successful
   `exit(v)` regardless of `v`.
-- On success, the compiled program's entire output (via
-  `print`/`print_str`) is the compiled ILVM program's source text and
-  nothing else — no wrapper, no extra lines.
-- `display` does not append a newline of its own, but every ILVM
-  `print`/`print_str` call does. If your compiled output maps each
-  `display` call directly to its own `print`/`print_str` call, you will
-  get a spurious extra newline between every pair of consecutive
-  `display`s — wrong output, since MiniScheme's `display` never inserts
-  one on its own. A compiled program that calls `display` more than once
-  needs to accumulate all of its output itself and emit it through a
-  single `print`/`print_str` at the very end, not one call per `display`.
+- On success, the compiler's entire output (via `print`/`print_str`) is the
+  compiled ILVM program's source text and nothing else — no wrapper or
+  diagnostic output.
 
 Illustrative usage, once you have some way to run ILVM programs (`ilvm`
 below stands in for whatever implementation you build or use):

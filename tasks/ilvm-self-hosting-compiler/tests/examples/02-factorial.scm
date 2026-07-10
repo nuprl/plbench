@@ -4,4 +4,3 @@
       (* n (fact (- n 1)))))
 
 (display (fact 5))
-(display "\n")

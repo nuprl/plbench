@@ -61,23 +61,19 @@ STATUS_RE = re.compile(r"^Normal termination\. Result = -?\d+$")
 ORACLE_MARKER = "ORACLE-NOT-SELF-HOSTING-7f3ac9e1d4b8407e9c2a1f6e5d0b8c33"
 
 # Hand-verified against environment/Scheme.md's semantics — independent of
-# anything the agent produced. Each compiled program's own output ends with
-# exactly one extra trailing newline beyond its source's own display calls:
-# a correct compiler must buffer all display output and flush it with a
-# single print_str at program end (ILVM's print/print_str each append their
-# own newline, so printing per-display would insert spurious newlines
-# between consecutive display calls) -- see instruction.md.
+# anything the agent produced. Each display call terminates its output with a
+# newline.
 EXPECTED = {
-    "01-arith.scm": "12\n\n",
-    "02-factorial.scm": "120\n\n",
-    "03-fibonacci.scm": "55\n\n",
-    "04-list-sum.scm": "15\n\n",
-    "05-strings.scm": "hello, world\n\n",
-    "06-classify.scm": "negative zero positive\n\n",
-    "07-closures-map.scm": "30\n\n",
-    "08-let.scm": "31\n\n",
-    "09-letrec-mutual.scm": "t\n\n",
-    "10-vector.scm": "20\n\n",
+    "01-arith.scm": "12\n",
+    "02-factorial.scm": "120\n",
+    "03-fibonacci.scm": "55\n",
+    "04-list-sum.scm": "15\n",
+    "05-strings.scm": "hello, world\n",
+    "06-classify.scm": "negative\nzero\npositive\n",
+    "07-closures-map.scm": "30\n",
+    "08-let.scm": "31\n",
+    "09-letrec-mutual.scm": "t\n",
+    "10-vector.scm": "20\n",
 }
 
 

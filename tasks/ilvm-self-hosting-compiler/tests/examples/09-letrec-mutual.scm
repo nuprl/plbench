@@ -4,4 +4,3 @@
     (is-even n)))
 
 (display (check 10))
-(display "\n")

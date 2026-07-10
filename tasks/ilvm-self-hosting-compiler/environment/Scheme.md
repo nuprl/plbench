@@ -5,7 +5,54 @@ the language's runtime semantics: values, expressions, special forms, and
 builtins. No interpreter or compiler for it is provided in this environment —
 that is what you are building.
 
-## Lexical Structure
+## 1. Grammar
+
+Terminals are shown in double quotes. `name`, `integer`, `float`, `boolean`,
+and `string` are the lexical classes described in §2. A trailing `...` means
+zero or more repetitions; `?` marks an optional item.
+
+```
+Program  ::= TopForm ...
+
+TopForm  ::= Define
+           | Expr
+           | "(" "begin" TopForm ... ")"
+
+Define   ::= "(" "define" name Expr ")"
+           | "(" "define" "(" name name ... ")" Expr ")"
+
+Expr     ::= integer | float | boolean | string | name
+           | "(" ")"
+           | VectorDatum
+           | "(" "quote" Datum ")"
+           | "'" Datum
+           | "(" "lambda" "(" name ... ")" Expr ")"
+           | "(" "if" Expr Expr Expr ")"
+           | "(" "let" "(" Binding ... ")" Expr ")"
+           | "(" "letrec" "(" Binding ... ")" Expr ")"
+           | "(" "begin" Expr ... ")"
+           | "(" "and" Expr ... ")"
+           | "(" "or" Expr ... ")"
+           | "(" "cond" Clause ... ElseClause? ")"
+           | "(" Expr Expr ... ")"
+
+Binding  ::= "(" name Expr ")"
+Clause    ::= "(" Expr Expr ")"
+ElseClause ::= "(" "else" Expr ")"
+
+Datum    ::= integer | float | boolean | string | name
+           | "(" Datum ... ")"
+           | VectorDatum
+
+VectorDatum ::= "#(" Datum ... ")"
+```
+
+`define` is a top-level form, including when nested in a top-level `begin`;
+it is not an expression. The grammar admits the empty list and vector literals
+in expression position so they can be parsed, but evaluating them is a runtime
+type error.
+
+## 2. Lexical Structure
 
 Whitespace separates tokens and is otherwise insignificant.
 
@@ -24,7 +71,7 @@ Vector literals use `#(datum ...)`. Vector literals are data; evaluating an
 unquoted vector literal as an expression is a runtime type error. Use the
 `vector` builtin to construct vectors during evaluation.
 
-## Values
+## 3. Values
 
 Runtime values are:
 
@@ -40,15 +87,15 @@ Runtime values are:
 Only `#f` is false in conditionals and short-circuiting forms. Every other
 value is truthy.
 
-## Expressions
+## 4. Expressions
 
 Self-evaluating expressions are integers, floats, booleans, and strings.
 
 A symbol expression looks up the symbol in the current lexical environment.
 Referencing a symbol with no binding — no enclosing lexical binding, no
-top-level definition, and no builtin of that name — is a static error: a
-well-formed program has no free variables anywhere in it (quoted data is
-exempt, since it's data, not an expression).
+top-level definition, no builtin of that name, and not the predefined `argv`
+binding — is a static error: a well-formed program has no free variables
+anywhere in it (quoted data is exempt, since it's data, not an expression).
 
 A non-empty list expression is either a special form or an application. For an
 application, the operator and all operands are evaluated left-to-right, then
@@ -58,7 +105,7 @@ or the wrong number of arguments is a runtime type error.
 The empty list, unquoted symbols, unquoted lists-as-data, unquoted vectors, and
 procedure values are not self-evaluating expressions.
 
-## Special Forms
+## 5. Special Forms
 
 `(quote datum)` returns `datum` without evaluating it.
 
@@ -94,67 +141,84 @@ matches, evaluation raises a runtime type error.
 `(define name expr)` and `(define (name param ...) body)` are valid only at top
 level. They install a binding and return the defined name as a symbol.
 
-## Builtins
+## 6. Builtins
+
+The forms below describe builtin arity and required argument types after
+operand evaluation. Metavariables are: `v` for any value, `n` for a number,
+`i` for an integer, `b` for a boolean, `s` for a string, `sym` for a symbol,
+`xs` for a proper list, `vec` for a vector, and `proc` for a procedure.
+Numbered metavariables have the same type, and `...` means zero or more
+additional arguments of the preceding kind.
 
 Arithmetic:
 
-- `+`, `*`: any number of integer or float arguments
-- `-`, `/`: one or more integer or float arguments
-- `=`, `<`, `>`, `<=`, `>=`: two or more numeric arguments, returning boolean
+- `(+ n ...)`, `(* n ...)`: zero or more numeric arguments
+- `(- n n ...)`, `(/ n n ...)`: one or more numeric arguments
+- `(= n1 n2 n ...)`, `(< n1 n2 n ...)`, `(> n1 n2 n ...)`,
+  `(<= n1 n2 n ...)`, `(>= n1 n2 n ...)`: two or more numeric arguments,
+  returning a boolean
 
 Predicates:
 
-- `number?`, `integer?`, `float?`, `boolean?`, `string?`, `symbol?`
-- `procedure?`, `null?`, `pair?`, `list?`, `vector?`
+- `(number? v)`, `(integer? v)`, `(float? v)`, `(boolean? v)`, `(string? v)`,
+  `(symbol? v)`
+- `(procedure? v)`, `(null? v)`, `(pair? v)`, `(list? v)`, `(vector? v)`
 
 Booleans and equality:
 
-- `not`: accepts a boolean and returns its negation
-- `eq?`: identity-like equality for symbols, booleans, the empty list, and
-  object identity for other values
-- `equal?`: structural equality
+- `(not b)`: returns the boolean's negation
+- `(eq? v1 v2)`: identity-like equality for symbols, booleans, and the empty
+  list, and object identity for other values
+- `(equal? v1 v2)`: structural equality
 
 Lists:
 
-- `cons`
-- `car`, `cdr`: require a non-empty list
-- `list`
-- `length`
-- `append`: concatenates lists
-- `list-ref`: requires an integer index in bounds
+- `(cons v xs)`
+- `(car xs)`, `(cdr xs)`: `xs` must be non-empty
+- `(list v ...)`
+- `(length xs)`
+- `(append xs ...)`: concatenates zero or more lists
+- `(list-ref xs i)`: `i` must be in bounds
 
 Vectors:
 
-- `vector`
-- `vector-length`
-- `vector-ref`: requires an integer index in bounds
+- `(vector v ...)`
+- `(vector-length vec)`
+- `(vector-ref vec i)`: `i` must be in bounds
 
 Strings and symbols:
 
-- `string-length`
-- `string-append`
-- `string-ref`: returns a one-character string and requires an integer index in
-  bounds
-- `string->symbol`
-- `symbol->string`
-- `char-code`: given a one-character string, returns its ASCII code point
-  (0-127) as an integer
-- `code-char`: given an integer in `0..127`, returns the corresponding
+- `(string-length s)`
+- `(string-append s ...)`
+- `(string-ref s i)`: returns a one-character string; `i` must be in bounds
+- `(string->symbol s)`
+- `(symbol->string sym)`
+- `(char-code s)`: `s` must contain exactly one character; returns its ASCII
+  code point (0-127) as an integer
+- `(code-char i)`: `i` must be in `0..127`; returns the corresponding
   one-character string
 
 Other:
 
-- `apply`: applies a procedure to a list of arguments
-- `display`: writes one value to stdout and returns `#f`; strings are written
-  without surrounding quotes or escape re-encoding, and other values use the
-  standard printed representation (integers and floats in decimal, `#t`/`#f`,
-  symbols by name, proper lists as `(a b c)`, vectors as `#(a b c)`)
-- `error`: raises a runtime error with a string message
+- `(apply proc xs)`: applies `proc` to the arguments in `xs`
+- `(display v)`: writes `v` followed by a newline to stdout and returns
+  `#f`; strings are written without surrounding quotes or escape re-encoding,
+  and other values use the standard printed representation (integers and
+  floats in decimal, `#t`/`#f`, symbols by name, proper lists as `(a b c)`,
+  vectors as `#(a b c)`)
+- `(error s)`: raises a runtime error with message `s`
 
-## Programs
+## 7. Programs
 
 A program is a sequence of top-level forms: `define`s and expressions
 (commonly `display` calls used for their side effect). Top-level forms
 execute in order. A well-formed program is closed (see "Expressions" above)
 and every special form is well-formed; a program that isn't is a static
 error, not a runtime one.
+
+Every program has a predefined binding named `argv`. Its value is a vector of
+the program's command-line argument strings. The first actual argument is at
+index `0`; unlike C's `argv`, the vector does not include the program name.
+The vector may be empty. Command-line arguments must be NUL-free ASCII. ILVM
+rejects non-ASCII arguments, and its packed argument strings use NUL as their
+terminator.
