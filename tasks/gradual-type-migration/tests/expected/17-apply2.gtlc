@@ -1,0 +1,1 @@
+fun x : any . fun y : any . y x x

@@ -1,0 +1,4 @@
+fun x : any .
+  (fun f : any -> int .
+    (fun xx : any -> int . fun y : int . xx) f (f x))
+  (fun z : any . 1)

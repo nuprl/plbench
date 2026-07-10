@@ -1,0 +1,27 @@
+schema_version = "1.3"
+artifacts = []
+
+[task]
+name = "plbench/gradual-type-migration"
+description = "Implement safe and precise gradual type migration from scratch"
+keywords = ["programming-languages", "gradual-typing", "type-inference", "type-migration"]
+[[task.authors]]
+name = "Arjun Guha"
+email = "a.guha@northeastern.edu"
+
+[metadata]
+category = "programming-languages"
+difficulty = "hard"
+
+[verifier]
+timeout_sec = 900.0
+
+[agent]
+timeout_sec = 3600.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 900.0
+os = "linux"
+cpus = 4
+memory_mb = 4096
