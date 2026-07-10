@@ -1,0 +1,14 @@
+# Theme: Composition distributes over choice and stars obey classical KA identities.
+# Source: Kleene-algebra laws used by the paper's normalization and bisimulation algorithm.
+# Property left-distributes: A common prefix distributes into both history branches.
+# Property right-distributes: A common suffix distributes into both branches.
+# Property factor-common-prefix: Factoring a dup prefix preserves the output set.
+# Property denesting: The standard (p+q)* denesting identity holds with dup as p.
+# Property sliding: The standard (p.q)*.p = p.(q.p)* identity is history-sensitive but valid.
+# Property missing-dup-branch: Incorrect factoring leaves one branch without a snapshot.
+check left-distributes: dup . (dst_port <- 80 + dst_port <- 443) == dup . dst_port <- 80 + dup . dst_port <- 443;
+check right-distributes: (dst_port <- 80 + dst_port <- 443) . dup == dst_port <- 80 . dup + dst_port <- 443 . dup;
+check factor-common-prefix: dup . dst_ip <- 192.0.2.1 + dup . dst_ip <- 192.0.2.2 == dup . (dst_ip <- 192.0.2.1 + dst_ip <- 192.0.2.2);
+check denesting: (dup + dst_port <- 443)* == dup* . (dst_port <- 443 . dup*)*;
+check sliding: (dup . dst_port <- 443)* . dup == dup . (dst_port <- 443 . dup)*;
+check missing-dup-branch: dup . (dst_port <- 80 + dst_port <- 443) == dup . dst_port <- 80 + dst_port <- 443;

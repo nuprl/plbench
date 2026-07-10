@@ -1,0 +1,7 @@
+four-assignments-commute: equivalent
+complete-packet-snapshot: equivalent
+zero-vs-max-port: not equivalent
+zero-vs-max-ip: not equivalent
+dup-followed-by-id: equivalent
+assignment-star-finite: equivalent
+snapshot-assignment-star-unbounded: not equivalent

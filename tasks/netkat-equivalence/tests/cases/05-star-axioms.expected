@@ -1,0 +1,8 @@
+left-unfold: equivalent
+right-unfold: equivalent
+star-idempotent: equivalent
+add-id-under-star: equivalent
+drop-star-is-id: equivalent
+one-dup-is-not-all: not equivalent
+positive-dups-two-forms: equivalent
+even-dups-not-all: not equivalent

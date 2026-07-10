@@ -1,0 +1,6 @@
+association-across-two-dups: equivalent
+different-middle-hop: not equivalent
+overwritten-before-first-snapshot: equivalent
+direct-endpoint-loses-path: not equivalent
+same-snapshots-different-final-overwrite: not equivalent
+repeated-same-snapshot: not equivalent

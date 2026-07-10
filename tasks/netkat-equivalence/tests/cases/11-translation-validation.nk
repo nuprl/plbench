@@ -1,0 +1,38 @@
+# Theme: Comparing a high-level path policy with the closure of compiled rules and topology.
+# Source: Translation validation equation p = (c.t)*.c in Section 7 of the paper.
+# Property valid-compiled-paths: Explicit A-B and A-B-C paths equal the compiled closure.
+# Property missing-topology-snapshot: Erasing dup keeps endpoints but loses the A-B-C path history.
+# Property endpoint-only-version: If both specifications erase paths, the finite endpoint relation agrees.
+# Property wrong-compiled-rule: Sending B to a different backend changes compiled behavior.
+# Property duplicate-rule-harmless: Repeating one compiled rule in union does not change its set semantics.
+check valid-compiled-paths:
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  ==
+  (((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)) . dup)*
+  . ((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3));
+check missing-topology-snapshot:
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  ==
+  ((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3))*
+  . ((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3));
+check endpoint-only-version:
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  ==
+  ((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3))*
+  . ((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2) + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3));
+check wrong-compiled-rule:
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  ==
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.4);
+check duplicate-rule-harmless:
+  (filter(dst_port = 80) . dst_port <- 8080) + (filter(dst_port = 80) . dst_port <- 8080)
+  ==
+  filter(dst_port = 80) . dst_port <- 8080;

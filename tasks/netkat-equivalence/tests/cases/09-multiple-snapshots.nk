@@ -1,0 +1,14 @@
+# Theme: Exact intermediate packets across histories containing several dups.
+# Source: Reduced strings alpha.p0.dup.p1... from Sections 2-3 of the paper.
+# Property association-across-two-dups: Parentheses do not alter a two-hop history.
+# Property different-middle-hop: Equal initial and final packets do not hide a different middle snapshot.
+# Property overwritten-before-first-snapshot: Only the final pre-dup assignment is recorded.
+# Property direct-endpoint-loses-path: A two-hop recorded route is not an endpoint assignment.
+# Property same-snapshots-different-final-overwrite: Different final current packets remain observable.
+# Property repeated-same-snapshot: Two dups record two entries even when packet values agree.
+check association-across-two-dups: (dst_ip <- 10.0.0.1 . dup) . (dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3) == dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3;
+check different-middle-hop: dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3 == dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.4 . dup . dst_ip <- 10.0.0.3;
+check overwritten-before-first-snapshot: dst_ip <- 10.0.0.1 . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3 == dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3;
+check direct-endpoint-loses-path: dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3 == dst_ip <- 10.0.0.3;
+check same-snapshots-different-final-overwrite: dup . dst_port <- 80 . dup . dst_port <- 443 == dup . dst_port <- 80 . dup . dst_port <- 8443;
+check repeated-same-snapshot: dup . dup == dup;

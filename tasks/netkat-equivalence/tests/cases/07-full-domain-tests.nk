@@ -1,0 +1,16 @@
+# Theme: Complements range over all IPv4 addresses and all 16-bit ports.
+# Source: Symbolic atom/base representation in Sections 5-6 of the paper.
+# Property port-partition: One exact port and its vast complement partition the universe.
+# Property partition-before-assignment: Partitioning then overwriting is the unconditional assignment.
+# Property de-morgan: Two Boolean presentations of excluding addresses agree.
+# Property complement-survives-dup: A successful test can cross dup because the head is preserved.
+# Property complement-is-not-empty: Excluding two IPv4 constants still leaves billions of addresses.
+# Property assigned-value-fails-complement: Assigning one value then requiring its complement drops.
+# Property ipv4-boundaries-differ: Minimum and maximum IPv4 addresses denote different tests.
+check port-partition: filter(src_port = 0) + filter(!(src_port = 0)) == id;
+check partition-before-assignment: (filter(dst_port = 80) + filter(!(dst_port = 80))) . dst_port <- 443 == dst_port <- 443;
+check de-morgan: filter(!(dst_ip = 192.0.2.1 | dst_ip = 192.0.2.2)) == filter(!(dst_ip = 192.0.2.1) & !(dst_ip = 192.0.2.2));
+check complement-survives-dup: filter(!(dst_port = 65535)) . dup == dup . filter(!(dst_port = 65535));
+check complement-is-not-empty: filter(!(dst_ip = 192.0.2.1 | dst_ip = 192.0.2.2)) == drop;
+check assigned-value-fails-complement: dst_ip <- 192.0.2.1 . filter(!(dst_ip = 192.0.2.1)) == drop;
+check ipv4-boundaries-differ: filter(src_ip = 0.0.0.0) == filter(src_ip = 255.255.255.255);

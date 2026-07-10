@@ -1,0 +1,22 @@
+# Theme: Natural header boundaries and interactions across all four fixed headers.
+# Source: Fixed-header adaptation of complete tests and assignments used throughout the paper.
+# Property four-assignments-commute: Assignments to four distinct headers can be reordered.
+# Property complete-packet-snapshot: Reordering distinct updates before dup records the same packet.
+# Property zero-vs-max-port: Port-domain endpoints denote different filters.
+# Property zero-vs-max-ip: IPv4-domain endpoints denote different assignments.
+# Property dup-followed-by-id: Skip after a snapshot is inert.
+# Property assignment-star-finite: Repeating an idempotent assignment yields id or one assignment.
+# Property snapshot-assignment-star-unbounded: Adding dup makes the star generate unbounded histories.
+check four-assignments-commute:
+  src_ip <- 0.0.0.0 . dst_ip <- 255.255.255.255 . src_port <- 0 . dst_port <- 65535
+  ==
+  dst_port <- 65535 . src_port <- 0 . dst_ip <- 255.255.255.255 . src_ip <- 0.0.0.0;
+check complete-packet-snapshot:
+  src_ip <- 192.0.2.1 . dst_ip <- 198.51.100.1 . src_port <- 12345 . dst_port <- 443 . dup
+  ==
+  dst_port <- 443 . src_port <- 12345 . dst_ip <- 198.51.100.1 . src_ip <- 192.0.2.1 . dup;
+check zero-vs-max-port: filter(src_port = 0) == filter(src_port = 65535);
+check zero-vs-max-ip: src_ip <- 0.0.0.0 == src_ip <- 255.255.255.255;
+check dup-followed-by-id: dup . id == dup;
+check assignment-star-finite: (dst_port <- 443)* == id + dst_port <- 443;
+check snapshot-assignment-star-unbounded: (dup . dst_port <- 443)* == id + dup . dst_port <- 443;

@@ -1,0 +1,18 @@
+# Theme: Header-assignment, test, and duplication axioms specific to NetKAT.
+# Source: The NetKAT axiom table in Section 2 of the POPL 2015 paper.
+# Property distinct-assignments-commute: Updates to different headers commute.
+# Property unrelated-test-commutes: Testing one header commutes with changing another.
+# Property assignment-matching-test: An assignment guarantees its matching test.
+# Property test-then-same-assignment: Reassigning a tested value is redundant.
+# Property overwrite: The last assignment to one header wins before any snapshot.
+# Property distinct-values-drop: Contradictory tests denote drop.
+# Property test-crosses-dup: Duplication preserves the tested current value.
+# Property assignment-does-not-cross-dup: Moving an assignment across dup changes the recorded packet.
+check distinct-assignments-commute: src_ip <- 192.0.2.1 . dst_port <- 443 == dst_port <- 443 . src_ip <- 192.0.2.1;
+check unrelated-test-commutes: filter(src_port = 50000) . dst_ip <- 198.51.100.2 == dst_ip <- 198.51.100.2 . filter(src_port = 50000);
+check assignment-matching-test: dst_port <- 443 . filter(dst_port = 443) == dst_port <- 443;
+check test-then-same-assignment: filter(dst_port = 443) . dst_port <- 443 == filter(dst_port = 443);
+check overwrite: dst_port <- 80 . dst_port <- 443 == dst_port <- 443;
+check distinct-values-drop: filter(dst_port = 80) . filter(dst_port = 443) == drop;
+check test-crosses-dup: filter(src_ip = 192.0.2.7) . dup == dup . filter(src_ip = 192.0.2.7);
+check assignment-does-not-cross-dup: dst_port <- 443 . dup == dup . dst_port <- 443;

@@ -1,0 +1,16 @@
+# Theme: Core Kleene-algebra identities and immediate inequations.
+# Source: KAT axioms summarized in Sections 1-2 of the POPL 2015 paper.
+# Property left-identity: Sequential id on the left changes nothing.
+# Property right-identity: Sequential id on the right changes nothing.
+# Property drop-annihilates: Sequencing after drop has no outputs.
+# Property choice-idempotent: Set union discards duplicate derivations.
+# Property choice-commutative: The order of union branches is irrelevant.
+# Property sequence-associative: Parenthesization does not change composition.
+# Property id-is-not-drop: Passing every history differs from rejecting every history.
+check left-identity: id . dst_port <- 443 == dst_port <- 443;
+check right-identity: src_ip <- 192.0.2.1 . id == src_ip <- 192.0.2.1;
+check drop-annihilates: drop . dup . dst_ip <- 198.51.100.1 == drop;
+check choice-idempotent: dup + dup == dup;
+check choice-commutative: dup + dst_port <- 80 == dst_port <- 80 + dup;
+check sequence-associative: (dup . dst_port <- 80) . dst_ip <- 192.0.2.1 == dup . (dst_port <- 80 . dst_ip <- 192.0.2.1);
+check id-is-not-drop: id == drop;

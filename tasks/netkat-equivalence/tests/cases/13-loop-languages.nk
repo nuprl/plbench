@@ -1,0 +1,20 @@
+# Theme: Cyclic history languages require fixpoints or bisimulation, not terminating simulation.
+# Source: Forwarding-loop application and bisimulation algorithm in Sections 6-7 of the paper.
+# Property nested-star-collapses: Iterating an already closed loop language adds nothing.
+# Property loop-left-unfold: A recorded two-address loop satisfies star unfolding.
+# Property loop-not-id: Zero iterations are not the only possible loop history.
+# Property reversed-loop-differs: Reversing recorded waypoint order changes histories.
+# Property sliding-loop: The KA sliding identity holds across a dup/assignment cycle.
+# Property impossible-cycle-is-drop: A contradictory test inside a would-be loop has no execution.
+check nested-star-collapses: ((dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*)* == (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*;
+check loop-left-unfold:
+  (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*
+  ==
+  id + (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup) . (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*;
+check loop-not-id: (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)* == id;
+check reversed-loop-differs:
+  (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*
+  ==
+  (dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.1 . dup)*;
+check sliding-loop: (dup . dst_port <- 443)* . dup == dup . (dst_port <- 443 . dup)*;
+check impossible-cycle-is-drop: filter(dst_port = 80) . dst_port <- 443 . filter(dst_port = 80) . dup == drop;

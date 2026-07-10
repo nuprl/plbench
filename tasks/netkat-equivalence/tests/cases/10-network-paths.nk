@@ -1,0 +1,20 @@
+# Theme: Network paths that agree or disagree independently of their endpoints.
+# Source: Path encoding with dup and translation-validation motivation in Sections 2 and 7.
+# Property same-route-factored: Factoring a common first hop preserves both complete routes.
+# Property parallel-route-order: Reordering two possible paths preserves their history set.
+# Property direct-vs-two-hop: A direct delivery and a two-hop delivery have different histories.
+# Property endpoint-erasure: Without dup, overwritten waypoints disappear from semantics.
+# Property loop-unfold: A recorded loop star equals zero loops plus one loop and more loops.
+# Property wrong-waypoint: Changing only one recorded waypoint breaks equivalence.
+check same-route-factored:
+  dst_ip <- 10.0.0.1 . dup . ((dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4) + (dst_ip <- 10.0.0.3 . dup . dst_ip <- 10.0.0.4))
+  ==
+  (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4) + (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.3 . dup . dst_ip <- 10.0.0.4);
+check parallel-route-order:
+  (dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4) + (dst_ip <- 10.0.0.3 . dup . dst_ip <- 10.0.0.4)
+  ==
+  (dst_ip <- 10.0.0.3 . dup . dst_ip <- 10.0.0.4) + (dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4);
+check direct-vs-two-hop: dst_ip <- 10.0.0.4 == dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4;
+check endpoint-erasure: dst_ip <- 10.0.0.2 . dst_ip <- 10.0.0.3 . dst_ip <- 10.0.0.4 == dst_ip <- 10.0.0.4;
+check loop-unfold: (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)* == id + (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup) . (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup)*;
+check wrong-waypoint: dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.4 == dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.3 . dup . dst_ip <- 10.0.0.4;

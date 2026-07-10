@@ -1,0 +1,6 @@
+disjoint-cascade: equivalent
+default-rule-partition: equivalent
+overlapping-parallel-not-priority: not equivalent
+identical-overlap-harmless: equivalent
+path-recording-cascade: equivalent
+wrong-action: not equivalent

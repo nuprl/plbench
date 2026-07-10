@@ -1,0 +1,14 @@
+# Theme: Programs with identical current-packet behavior but different histories.
+# Source: Packet-history and dup semantics from Section 2 of the paper.
+# Property dup-is-not-id: Dup adds one packet to every history.
+# Property endpoint-assignment-not-enough: Both sides finish on port 443, but only one records a hop.
+# Property snapshot-before-or-after: The snapshot contains different destination ports.
+# Property post-snapshot-overwrite: Assignments overwritten after the same snapshot are unobservable.
+# Property pre-snapshot-overwrite-visible: Values present when dup runs remain in history.
+# Property duplicate-branches-collapse: Identical history-producing branches form a set, not a multiset.
+check dup-is-not-id: dup == id;
+check endpoint-assignment-not-enough: dst_port <- 443 == dup . dst_port <- 443;
+check snapshot-before-or-after: dup . dst_port <- 443 == dst_port <- 443 . dup;
+check post-snapshot-overwrite: dup . dst_port <- 443 . dst_port <- 80 == dup . dst_port <- 80;
+check pre-snapshot-overwrite-visible: dst_port <- 443 . dup . dst_port <- 80 == dst_port <- 80 . dup . dst_port <- 80;
+check duplicate-branches-collapse: (dup . dst_port <- 443) + (dup . dst_port <- 443) == dup . dst_port <- 443;

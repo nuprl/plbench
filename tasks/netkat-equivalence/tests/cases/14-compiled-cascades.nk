@@ -1,0 +1,32 @@
+# Theme: Priority cascades of match-action rules reflected back into NetKAT.
+# Source: Compiler-rule encoding as nested conditionals in Section 7 of the paper.
+# Property disjoint-cascade: Disjoint HTTP/HTTPS rules equal their parallel presentation.
+# Property default-rule-partition: An exact rule plus its complement gives a complete cascade.
+# Property overlapping-parallel-not-priority: Parallel overlap produces two outputs; priority produces one.
+# Property identical-overlap-harmless: If overlapping branches have the same action, set union collapses them.
+# Property path-recording-cascade: Factoring dup after a complete match partition preserves histories.
+# Property wrong-action: Changing one reflected action invalidates translation.
+check disjoint-cascade:
+  filter(dst_port = 80) . dst_port <- 8080 + filter(dst_port = 443) . dst_port <- 8443
+  ==
+  filter(dst_port = 443) . dst_port <- 8443 + filter(dst_port = 80) . dst_port <- 8080;
+check default-rule-partition:
+  filter(dst_port = 80) . dst_ip <- 10.0.0.1 + filter(!(dst_port = 80)) . dst_ip <- 10.0.0.2
+  ==
+  (filter(dst_port = 80) . dst_ip <- 10.0.0.1) + (filter(!(dst_port = 80)) . dst_ip <- 10.0.0.2);
+check overlapping-parallel-not-priority:
+  filter(dst_port = 80) . dst_ip <- 10.0.0.1 + id . dst_ip <- 10.0.0.2
+  ==
+  filter(dst_port = 80) . dst_ip <- 10.0.0.1 + filter(!(dst_port = 80)) . dst_ip <- 10.0.0.2;
+check identical-overlap-harmless:
+  filter(dst_port = 80) . dst_ip <- 10.0.0.1 + id . dst_ip <- 10.0.0.1
+  ==
+  dst_ip <- 10.0.0.1;
+check path-recording-cascade:
+  (filter(dst_port = 80) + filter(!(dst_port = 80))) . dup . dst_ip <- 10.0.0.1
+  ==
+  dup . dst_ip <- 10.0.0.1;
+check wrong-action:
+  filter(dst_port = 80) . dst_port <- 8080
+  ==
+  filter(dst_port = 80) . dst_port <- 8081;

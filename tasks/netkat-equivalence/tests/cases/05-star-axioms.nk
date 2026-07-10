@@ -1,0 +1,18 @@
+# Theme: Kleene-star fixed points, including a history-producing action.
+# Source: Kleene algebra axioms and derivative treatment of star in the paper.
+# Property left-unfold: Zero iterations or one action followed by more iterations.
+# Property right-unfold: The symmetric right-unfold law.
+# Property star-idempotent: Iterating an already iterated action adds no histories.
+# Property add-id-under-star: Explicit skip is already supplied by star.
+# Property drop-star-is-id: Repeating an impossible action only permits zero iterations.
+# Property one-dup-is-not-all: A finite approximation misses histories with two or more dups.
+# Property positive-dups-two-forms: Both sides generate every positive number of dups.
+# Property even-dups-not-all: Repeating pairs generates only even history growth.
+check left-unfold: dup* == id + dup . dup*;
+check right-unfold: dup* == id + dup* . dup;
+check star-idempotent: dup* . dup* == dup*;
+check add-id-under-star: (id + dup)* == dup*;
+check drop-star-is-id: drop* == id;
+check one-dup-is-not-all: dup* == id + dup;
+check positive-dups-two-forms: dup . dup* == dup* . dup;
+check even-dups-not-all: (dup . dup)* == dup*;

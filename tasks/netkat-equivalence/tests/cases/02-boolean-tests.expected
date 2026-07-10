@@ -1,0 +1,7 @@
+true-is-id: equivalent
+false-is-drop: equivalent
+conjunction-is-sequence: equivalent
+disjunction-is-choice: equivalent
+excluded-middle: equivalent
+contradictory-ports: equivalent
+restrictive-test-not-id: not equivalent

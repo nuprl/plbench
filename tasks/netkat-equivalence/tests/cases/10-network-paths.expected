@@ -1,0 +1,6 @@
+same-route-factored: equivalent
+parallel-route-order: equivalent
+direct-vs-two-hop: not equivalent
+endpoint-erasure: equivalent
+loop-unfold: equivalent
+wrong-waypoint: not equivalent

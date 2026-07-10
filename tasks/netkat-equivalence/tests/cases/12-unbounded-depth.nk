@@ -1,0 +1,34 @@
+# Theme: Inequations whose shortest distinguishing history is deliberately long.
+# Source: Exponential derivative-state warning and unbounded stars in Sections 5-6 of the paper.
+# Property finite-twelve-not-star: Enumerating zero through twelve dups misses thirteen dups.
+# Property thirteen-vs-twelve: Fixed-length histories differing only at depth thirteen are distinct.
+# Property long-unfold: Thirteen mandatory dups followed by dup* has the expected recursive form.
+# Property late-waypoint-difference: Two routes agree for twelve snapshots and differ at the thirteenth.
+# Property long-common-suffix: Factoring a long common dup suffix is valid.
+check finite-twelve-not-star:
+  id + dup + dup.dup + dup.dup.dup + dup.dup.dup.dup
+  + dup.dup.dup.dup.dup + dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup + dup.dup.dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup
+  == dup*;
+check thirteen-vs-twelve:
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup
+  ==
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup;
+check long-unfold:
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup . dup*
+  ==
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup
+  + dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup . dup . dup*;
+check late-waypoint-difference:
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup . dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.3
+  ==
+  dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup.dup . dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3;
+check long-common-suffix:
+  (dst_port <- 80 + dst_port <- 443) . dup.dup.dup.dup.dup.dup.dup.dup
+  ==
+  dst_port <- 80 . dup.dup.dup.dup.dup.dup.dup.dup
+  + dst_port <- 443 . dup.dup.dup.dup.dup.dup.dup.dup;

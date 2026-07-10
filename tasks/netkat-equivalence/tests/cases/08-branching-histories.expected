@@ -1,0 +1,6 @@
+branch-order: equivalent
+distribute-after-branch: equivalent
+overwritten-before-snapshot: equivalent
+snapshot-preserves-branch: not equivalent
+endpoints-collapse-is-wrong: not equivalent
+filtered-partition: equivalent

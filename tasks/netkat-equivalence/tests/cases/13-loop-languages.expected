@@ -1,0 +1,6 @@
+nested-star-collapses: equivalent
+loop-left-unfold: equivalent
+loop-not-id: not equivalent
+reversed-loop-differs: not equivalent
+sliding-loop: equivalent
+impossible-cycle-is-drop: equivalent

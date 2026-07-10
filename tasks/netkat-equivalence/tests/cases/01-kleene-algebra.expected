@@ -1,0 +1,7 @@
+left-identity: equivalent
+right-identity: equivalent
+drop-annihilates: equivalent
+choice-idempotent: equivalent
+choice-commutative: equivalent
+sequence-associative: equivalent
+id-is-not-drop: not equivalent

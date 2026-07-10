@@ -1,0 +1,8 @@
+distinct-assignments-commute: equivalent
+unrelated-test-commutes: equivalent
+assignment-matching-test: equivalent
+test-then-same-assignment: equivalent
+overwrite: equivalent
+distinct-values-drop: equivalent
+test-crosses-dup: equivalent
+assignment-does-not-cross-dup: not equivalent

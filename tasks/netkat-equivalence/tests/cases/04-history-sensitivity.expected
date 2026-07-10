@@ -1,0 +1,6 @@
+dup-is-not-id: not equivalent
+endpoint-assignment-not-enough: not equivalent
+snapshot-before-or-after: not equivalent
+post-snapshot-overwrite: equivalent
+pre-snapshot-overwrite-visible: not equivalent
+duplicate-branches-collapse: equivalent

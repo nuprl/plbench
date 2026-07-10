@@ -1,0 +1,14 @@
+# Theme: Union denotes sets of complete histories, not only endpoint packets.
+# Source: Conjunctive union and history semantics in Section 2 of the paper.
+# Property branch-order: Reordering two recorded alternatives changes nothing.
+# Property distribute-after-branch: A suffix snapshot distributes across a choice.
+# Property overwritten-before-snapshot: Unsnapshotted alternative values disappear after overwrite.
+# Property snapshot-preserves-branch: Taking the snapshot before overwrite preserves both alternatives.
+# Property endpoints-collapse-is-wrong: Two recorded paths cannot be replaced by one endpoint update.
+# Property filtered-partition: Disjoint input classes may be written as one Boolean-partitioned choice.
+check branch-order: (dst_ip <- 10.0.0.1 . dup) + (dst_ip <- 10.0.0.2 . dup) == (dst_ip <- 10.0.0.2 . dup) + (dst_ip <- 10.0.0.1 . dup);
+check distribute-after-branch: (dst_port <- 80 + dst_port <- 443) . dup == dst_port <- 80 . dup + dst_port <- 443 . dup;
+check overwritten-before-snapshot: (dst_ip <- 10.0.0.1 + dst_ip <- 10.0.0.2) . dst_ip <- 10.0.0.3 . dup == dst_ip <- 10.0.0.3 . dup;
+check snapshot-preserves-branch: (dst_ip <- 10.0.0.1 + dst_ip <- 10.0.0.2) . dup . dst_ip <- 10.0.0.3 == dst_ip <- 10.0.0.3 . dup;
+check endpoints-collapse-is-wrong: (dst_ip <- 10.0.0.1 . dup . dst_ip <- 10.0.0.3) + (dst_ip <- 10.0.0.2 . dup . dst_ip <- 10.0.0.3) == dst_ip <- 10.0.0.3;
+check filtered-partition: filter(dst_port = 80) . dup + filter(!(dst_port = 80)) . dup == dup;

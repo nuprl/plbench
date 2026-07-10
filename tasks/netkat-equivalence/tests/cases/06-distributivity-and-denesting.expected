@@ -1,0 +1,6 @@
+left-distributes: equivalent
+right-distributes: equivalent
+factor-common-prefix: equivalent
+denesting: equivalent
+sliding: equivalent
+missing-dup-branch: not equivalent

@@ -1,0 +1,7 @@
+port-partition: equivalent
+partition-before-assignment: equivalent
+de-morgan: equivalent
+complement-survives-dup: equivalent
+complement-is-not-empty: not equivalent
+assigned-value-fails-complement: equivalent
+ipv4-boundaries-differ: not equivalent

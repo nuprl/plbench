@@ -1,0 +1,16 @@
+# Theme: Boolean tests as history-preserving filters over the full packet space.
+# Source: Boolean-algebra and test semantics from Section 2 of the paper.
+# Property true-is-id: A universally successful test is skip.
+# Property false-is-drop: A universally failing test rejects every history.
+# Property conjunction-is-sequence: Two tests in sequence denote intersection.
+# Property disjunction-is-choice: Choice between tests denotes union.
+# Property excluded-middle: A test plus its complement accepts every packet.
+# Property contradictory-ports: Distinct exact values for one header cannot coexist.
+# Property restrictive-test-not-id: A single destination value excludes other values.
+check true-is-id: filter(true) == id;
+check false-is-drop: filter(false) == drop;
+check conjunction-is-sequence: filter(dst_port = 80 & src_port = 50000) == filter(dst_port = 80) . filter(src_port = 50000);
+check disjunction-is-choice: filter(dst_port = 80 | dst_port = 443) == filter(dst_port = 80) + filter(dst_port = 443);
+check excluded-middle: filter(dst_ip = 192.0.2.1) + filter(!(dst_ip = 192.0.2.1)) == id;
+check contradictory-ports: filter(dst_port = 80) . filter(dst_port = 443) == drop;
+check restrictive-test-not-id: filter(dst_ip = 192.0.2.1) == id;

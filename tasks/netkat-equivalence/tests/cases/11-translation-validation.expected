@@ -1,0 +1,5 @@
+valid-compiled-paths: equivalent
+missing-topology-snapshot: not equivalent
+endpoint-only-version: equivalent
+wrong-compiled-rule: not equivalent
+duplicate-rule-harmless: equivalent
