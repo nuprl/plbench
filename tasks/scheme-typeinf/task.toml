@@ -2,9 +2,12 @@ schema_version = "1.3"
 artifacts = []
 
 [task]
-name = "nuprl/scheme-typeinf"
-description = "Invent a sound type inference algorithm for MiniScheme; metacircular interpreter challenge"
-keywords = ["programming-languages", "type-inference", "scheme", "metacircular"]
+name = "plbench/scheme-typeinf"
+description = "Invent a sound type inference algorithm for MiniScheme"
+keywords = ["programming-languages", "type-inference", "soft typing"]
+[[task.authors]]
+name = "Arjun Guha"
+email = "a.guha@northeastern.edu"
 
 [metadata]
 category = "programming-languages"
@@ -21,4 +24,4 @@ network_mode = "public"
 build_timeout_sec = 900.0
 os = "linux"
 cpus = 4
-memory_mb = 8192
+memory_mb = 4096
