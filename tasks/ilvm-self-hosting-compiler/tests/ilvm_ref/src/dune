@@ -1,0 +1,12 @@
+(ocamllex lexer)
+(ocamlyacc parser)
+
+(library
+ (name ilvm_lib)
+ (wrapped false)
+ (modules error syntax parser lexer eval ilvm cli))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries ilvm_lib))

@@ -14,19 +14,25 @@ let parse source =
       raise (Ast.Error (Printf.sprintf "syntax error at line %d, column %d"
         pos.pos_lnum column))
 
-let () =
-  if Array.length Sys.argv < 2 then begin
-    prerr_endline "usage: minischeme PROGRAM [ARG ...]";
-    exit 2
-  end;
+let execute program args =
   try
-    let args =
-      Array.to_list (Array.sub Sys.argv 2 (Array.length Sys.argv - 2))
-    in
-    let forms = parse (read_file Sys.argv.(1)) in
+    let forms = parse (read_file program) in
     ignore (Interp.eval_program forms (Interp.make_global_env args))
   with
   | Ast.Error message
   | Sys_error message ->
       prerr_endline ("error: " ^ message);
       exit 1
+
+let () =
+  let open Cmdliner in
+  let program =
+    Arg.(required & pos 0 (some file) None
+         & info [] ~docv:"PROGRAM" ~doc:"MiniScheme source file to execute.")
+  in
+  let arguments =
+    Arg.(value & pos_right 0 string []
+         & info [] ~docv:"ARG" ~doc:"Program argument supplied through argv.")
+  in
+  let info = Cmd.info "minischeme" ~doc:"Execute a MiniScheme program" in
+  exit (Cmd.eval (Cmd.v info Term.(const execute $ program $ arguments)))

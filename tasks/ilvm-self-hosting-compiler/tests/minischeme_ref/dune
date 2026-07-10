@@ -1,0 +1,7 @@
+(ocamllex lexer)
+(ocamlyacc parser)
+
+(executable
+ (name main)
+ (modules ast parser lexer interp main)
+ (libraries cmdliner))

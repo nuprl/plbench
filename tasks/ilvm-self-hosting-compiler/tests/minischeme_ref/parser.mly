@@ -5,9 +5,7 @@ let atom token =
   if token = "#t" then Bool true
   else if token = "#f" then Bool false
   else
-    try
-      if String.contains token '.' then Float (float_of_string token)
-      else Int (int_of_string token)
+    try Int (int_of_string token)
     with Failure _ -> Symbol token
 %}
 

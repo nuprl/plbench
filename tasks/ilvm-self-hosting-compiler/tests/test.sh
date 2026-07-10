@@ -2,20 +2,22 @@
 set -euo pipefail
 
 mkdir -p /logs/verifier
+eval "$(opam env --switch=system)"
 
-# Build our own reference ILVM implementation. This never runs (and never
-# gets built) during the agent's own working time — it only exists for
-# grading, and the agent is never shown it.
+# Build our own reference ILVM implementation. This never runs (and never gets
+# built) during the agent's own working time — it only exists for grading, and
+# the agent is never shown it.
 cd /tests/ilvm_ref
-cargo build --release --quiet
+dune runtest
+dune build --profile release src/main.exe
+cp _build/default/src/main.exe ilvm
 cd -
 
-# Build the trusted MiniScheme interpreter from its ocamllex/ocamlyacc sources.
-# These tools are part of the OCaml package installed in the task image.
+# Build the trusted MiniScheme interpreter from its Dune project. Its lexer and
+# parser remain generated from the checked-in ocamllex/ocamlyacc sources.
 cd /tests/minischeme_ref
-ocamlyacc parser.mly
-ocamllex lexer.mll
-ocamlc -o minischeme ast.ml parser.mli parser.ml lexer.ml interp.ml main.ml
+dune build --profile release main.exe
+cp _build/default/main.exe minischeme
 cd -
 
 # test_suite.py writes /logs/verifier/reward.txt itself on every normal

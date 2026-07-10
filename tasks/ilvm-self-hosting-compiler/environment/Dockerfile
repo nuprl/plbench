@@ -8,13 +8,15 @@ RUN apt-get update \
         ocaml \
         opam \
         m4 \
-        rustc \
-        cargo \
         build-essential \
         ca-certificates \
         nodejs \
         npm \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && opam init --bare --disable-sandboxing -y \
+    && opam switch create system ocaml-system -y \
+    && eval "$(opam env --switch=system)" \
+    && opam install -y dune ppx_inline_test cmdliner
 
 WORKDIR /app
 

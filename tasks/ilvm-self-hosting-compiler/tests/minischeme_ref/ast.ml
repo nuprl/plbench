@@ -1,6 +1,5 @@
 type t =
   | Int of int
-  | Float of float
   | Bool of bool
   | String of string
   | Symbol of string

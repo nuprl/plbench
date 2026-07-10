@@ -2,7 +2,6 @@ open Ast
 
 type value =
   | VInt of int
-  | VFloat of float
   | VBool of bool
   | VString of string
   | VSymbol of string
@@ -18,9 +17,6 @@ let fail message = raise (Ast.Error message)
 
 let rec string_of_value = function
   | VInt n -> string_of_int n
-  | VFloat n ->
-      let text = string_of_float n in
-      if text.[String.length text - 1] = '.' then text ^ "0" else text
   | VBool true -> "#t"
   | VBool false -> "#f"
   | VString text ->
@@ -76,8 +72,7 @@ let as_int who = function
   | value -> fail (who ^ ": expected integer, got " ^ string_of_value value)
 
 let as_number who = function
-  | VInt n -> `Int n
-  | VFloat n -> `Float n
+  | VInt n -> n
   | value -> fail (who ^ ": expected number, got " ^ string_of_value value)
 
 let as_bool who = function
@@ -113,7 +108,6 @@ let require_min_arity name expected args =
 
 let rec quoted = function
   | Int n -> VInt n
-  | Float n -> VFloat n
   | Bool value -> VBool value
   | String value -> VString value
   | Symbol value -> VSymbol value
@@ -123,9 +117,6 @@ let rec quoted = function
 let rec equal left right =
   match left, right with
   | VInt a, VInt b -> a = b
-  | VFloat a, VFloat b -> a = b
-  | VInt a, VFloat b -> float_of_int a = b
-  | VFloat a, VInt b -> a = float_of_int b
   | VBool a, VBool b -> a = b
   | VString a, VString b -> a = b
   | VSymbol a, VSymbol b -> a = b
@@ -143,66 +134,41 @@ let rec equal left right =
 let number_list who args = List.map (as_number who) args
 
 let add args =
-  let step total number =
-    match total, number with
-    | `Int a, `Int b -> `Int (a + b)
-    | `Int a, `Float b -> `Float (float_of_int a +. b)
-    | `Float a, `Int b -> `Float (a +. float_of_int b)
-    | `Float a, `Float b -> `Float (a +. b)
-  in
-  match List.fold_left step (`Int 0) (number_list "+" args) with
-  | `Int n -> VInt n | `Float n -> VFloat n
+  VInt (List.fold_left ( + ) 0 (number_list "+" args))
 
 let multiply args =
-  let step total number =
-    match total, number with
-    | `Int a, `Int b -> `Int (a * b)
-    | `Int a, `Float b -> `Float (float_of_int a *. b)
-    | `Float a, `Int b -> `Float (a *. float_of_int b)
-    | `Float a, `Float b -> `Float (a *. b)
-  in
-  match List.fold_left step (`Int 1) (number_list "*" args) with
-  | `Int n -> VInt n | `Float n -> VFloat n
+  VInt (List.fold_left ( * ) 1 (number_list "*" args))
 
 let subtract args =
   require_min_arity "-" 1 args;
   let numbers = number_list "-" args in
-  let subtract_one left right =
-    match left, right with
-    | `Int a, `Int b -> `Int (a - b)
-    | `Int a, `Float b -> `Float (float_of_int a -. b)
-    | `Float a, `Int b -> `Float (a -. float_of_int b)
-    | `Float a, `Float b -> `Float (a -. b)
-  in
   let result =
     match numbers with
-    | [`Int n] -> `Int (-n)
-    | [`Float n] -> `Float (-.n)
-    | first :: rest -> List.fold_left subtract_one first rest
+    | [n] -> -n
+    | first :: rest -> List.fold_left ( - ) first rest
     | [] -> assert false
   in
-  match result with `Int n -> VInt n | `Float n -> VFloat n
+  VInt result
 
 let divide args =
   require_min_arity "/" 1 args;
-  let as_float = function `Int n -> float_of_int n | `Float n -> n in
   let numbers = number_list "/" args in
+  let divide_one left right =
+    if right = 0 then fail "division by zero" else left / right
+  in
   let result =
     match numbers with
-    | [number] -> 1.0 /. as_float number
-    | first :: rest ->
-        List.fold_left (fun total n -> total /. as_float n)
-          (as_float first) rest
+    | [number] -> divide_one 1 number
+    | first :: rest -> List.fold_left divide_one first rest
     | [] -> assert false
   in
-  VFloat result
+  VInt result
 
 let compare_numbers name compare args =
   require_min_arity name 2 args;
-  let as_float = function `Int n -> float_of_int n | `Float n -> n in
   let rec adjacent = function
     | left :: (right :: _ as rest) ->
-        compare (as_float left) (as_float right) && adjacent rest
+        compare left right && adjacent rest
     | _ -> true
   in
   VBool (adjacent (number_list name args))
@@ -222,7 +188,6 @@ let rec apply procedure args =
 and eval expression env =
   match expression with
   | Int n -> VInt n
-  | Float n -> VFloat n
   | Bool value -> VBool value
   | String value -> VString value
   | Symbol name -> lookup env name
@@ -328,9 +293,8 @@ let builtin_bindings () =
     variadic ">" (compare_numbers ">" ( > ));
     variadic "<=" (compare_numbers "<=" ( <= ));
     variadic ">=" (compare_numbers ">=" ( >= ));
-    predicate "number?" (function VInt _ | VFloat _ -> true | _ -> false);
+    predicate "number?" (function VInt _ -> true | _ -> false);
     predicate "integer?" (function VInt _ -> true | _ -> false);
-    predicate "float?" (function VFloat _ -> true | _ -> false);
     predicate "boolean?" (function VBool _ -> true | _ -> false);
     predicate "string?" (function VString _ -> true | _ -> false);
     predicate "symbol?" (function VSymbol _ -> true | _ -> false);

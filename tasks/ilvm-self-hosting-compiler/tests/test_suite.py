@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-"""Grade a MiniScheme-to-ILVM compiler in two passes.
+"""Grade a MiniScheme-to-ILVM compiler against a directory of test programs.
 
-The submission is one MiniScheme program, /app/compiler.scm. For each example:
+For each MiniScheme test program P, the verifier runs P in three ways:
 
-1. Run compiler.scm with the trusted MiniScheme interpreter, then run the ILVM
-   it emits. This measures compiler correctness without requiring bootstrap.
-2. Ask compiler.scm to compile itself, run that generated ILVM compiler on the
-   same example, and run its output. This measures self-hosting.
+1. Run P directly with the reference MiniScheme interpreter to obtain the
+   expected behavior.
+2. Run compiler.scm with the reference MiniScheme interpreter to compile P
+   into ILVM, then run that ILVM program.
+3. Compile compiler.scm into an ILVM compiler, use that compiler to compile P
+   into ILVM, then run the resulting ILVM program.
 
-Both results must match the trusted MiniScheme interpreter's behavior on the
-example. Each pass contributes half of the reward.
+The second and third results must match the first. Each compiled path
+contributes half of the reward.
 
 The bundled oracle is deliberately written in Python rather than MiniScheme.
-Its marker selects the fallback compiler in run_source_compiler, the only
-oracle-specific execution path. It passes the first stage; compiling its
-MiniScheme stub produces an aborting compiler, so it earns no self-hosting
-credit.
+Its marker selects the fallback compiler in
+compile_with_submitted_compiler_in_reference_minischeme, the only
+oracle-specific execution path. It passes the first stage; compiling its stub
+produces an aborting compiler, so it earns no self-hosting credit.
 """
 
 from __future__ import annotations
@@ -27,9 +29,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-ILVM_REF = Path("/tests/ilvm_ref/target/release/ilvm")
-MINISCHEME_REF = Path("/tests/minischeme_ref/minischeme")
-COMPILER_SCM = Path("/app/compiler.scm")
+REFERENCE_ILVM_INTERPRETER = Path("/tests/ilvm_ref/ilvm")
+REFERENCE_MINISCHEME_INTERPRETER = Path("/tests/minischeme_ref/minischeme")
+SUBMITTED_COMPILER = Path("/app/compiler.scm")
 FALLBACK_COMPILER = Path("/app/.oracle_fallback_compiler.py")
 EXAMPLES = Path("/tests/examples")
 REWARD = Path("/logs/verifier/reward.txt")
@@ -38,12 +40,10 @@ ORACLE_MARKER = "ORACLE-NOT-SELF-HOSTING-7f3ac9e1d4b8407e9c2a1f6e5d0b8c33"
 STATUS_RE = re.compile(r"^Normal termination\. Result = -?\d+$")
 
 
-class VerifierError(Exception):
-    """The verifier or one of its private fixtures is broken."""
-
-
 @dataclass(frozen=True)
 class Result:
+    """Record whether a process succeeded and the text it wrote to stdout."""
+
     ok: bool
     output: str = ""
 
@@ -51,7 +51,7 @@ class Result:
 FAILED = Result(False)
 
 
-def strip_ilvm_status(stdout: str) -> str:
+def strip_reference_ilvm_interpreter_status(stdout: str) -> str:
     """Remove the reference ILVM interpreter's termination-status line."""
     body = stdout[:-1] if stdout.endswith("\n") else stdout
     output, _, status = body.rpartition("\n")
@@ -61,6 +61,8 @@ def strip_ilvm_status(stdout: str) -> str:
 
 
 def run_process(command: list[str], timeout: int, stdin: str | None = None) -> Result:
+    """Run a command and capture its exit status and standard output."""
+
     try:
         completed = subprocess.run(
             command,
@@ -74,119 +76,205 @@ def run_process(command: list[str], timeout: int, stdin: str | None = None) -> R
     return Result(completed.returncode == 0, completed.stdout)
 
 
-def run_minischeme(program: Path, args: list[str]) -> Result:
-    return run_process([str(MINISCHEME_REF), str(program), *args], timeout=60)
+def run_with_reference_minischeme_interpreter(
+    program: Path, args: list[str]
+) -> Result:
+    """Run a source program with the reference MiniScheme interpreter."""
+
+    return run_process(
+        [str(REFERENCE_MINISCHEME_INTERPRETER), str(program), *args], timeout=60
+    )
 
 
-def run_ilvm(program_text: str, args: list[str]) -> Result:
+def run_with_reference_ilvm_interpreter(
+    program_text: str, args: list[str]
+) -> Result:
+    """Run the reference ILVM interpreter."""
     with tempfile.NamedTemporaryFile("w", suffix=".ilvm", delete=False) as file:
         file.write(program_text)
         program = Path(file.name)
     try:
-        command = [str(ILVM_REF), "-m", "4000000", "-r", "64", str(program)]
+        command = [
+            str(REFERENCE_ILVM_INTERPRETER),
+            "-m",
+            "4000000",
+            "-r",
+            "64",
+            str(program),
+        ]
         for arg in args:
             command.extend(["-l", arg])
         result = run_process(command, timeout=60)
     finally:
         program.unlink(missing_ok=True)
-    return Result(result.ok, strip_ilvm_status(result.output))
+    return Result(result.ok, strip_reference_ilvm_interpreter_status(result.output))
 
 
-def run_source_compiler(source_text: str, is_oracle: bool) -> Result:
-    """Compile source_text with compiler.scm, or with the admitted oracle."""
+def compile_with_submitted_compiler_in_reference_minischeme(
+    source_text: str, is_oracle: bool
+) -> Result:
+    """Compile source using the submitted compiler in the reference interpreter."""
+
     if is_oracle:
         return run_process(
             [sys.executable, str(FALLBACK_COMPILER)],
             timeout=30,
             stdin=source_text,
         )
-    return run_minischeme(COMPILER_SCM, [source_text])
+    return run_with_reference_minischeme_interpreter(
+        SUBMITTED_COMPILER, [source_text]
+    )
 
 
-def run_ilvm_compiler(compiler: Result, source_text: str) -> Result:
-    if not compiler.ok:
+def compile_with_self_hosted_submitted_compiler_in_reference_ilvm(
+    submitted_compiler_in_ilvm: Result, source_text: str
+) -> Result:
+    """Compile source using the submitted compiler after it was compiled to ILVM."""
+
+    if not submitted_compiler_in_ilvm.ok:
         return FAILED
-    return run_ilvm(compiler.output, [source_text])
+    return run_with_reference_ilvm_interpreter(
+        submitted_compiler_in_ilvm.output, [source_text]
+    )
 
 
-def run_compiled_program(compiled: Result) -> Result:
-    if not compiled.ok:
+def run_generated_program_with_reference_ilvm_interpreter(
+    compiled_program: Result,
+) -> Result:
+    """Run ILVM generated by the submitted compiler in the reference interpreter."""
+
+    if not compiled_program.ok:
         return FAILED
-    return run_ilvm(compiled.output, [])
+    return run_with_reference_ilvm_interpreter(compiled_program.output, [])
 
 
-def same_behavior(expected: Result, actual: Result) -> bool:
-    return expected.ok == actual.ok and expected.output == actual.output
+def matches_reference_behavior(reference: Result, submitted: Result) -> bool:
+    """Return whether two runs have the same success status and stdout."""
+
+    return reference.ok == submitted.ok and reference.output == submitted.output
 
 
 def write_reward(reward: float) -> None:
+    """Write the final numeric reward in the format expected by Harbor."""
+
     REWARD.parent.mkdir(parents=True, exist_ok=True)
     REWARD.write_text(f"{reward:.6f}\n")
 
 
+def grade_submitted_compiler_on_example(
+    example: Path, submitted_compiler_in_ilvm: Result, is_oracle: bool
+) -> tuple[bool, bool]:
+    """Run one test program through all three paths and report both comparisons."""
+
+    source = example.read_text()
+
+    # 1. Run P directly with the reference MiniScheme interpreter to obtain
+    #    the expected behavior.
+    reference_result = run_with_reference_minischeme_interpreter(example, [])
+
+    # 2. Run compiler.scm with the reference MiniScheme interpreter to compile
+    #    P into ILVM, then run that ILVM program.
+    program_compiled_by_interpreted_submission = (
+        compile_with_submitted_compiler_in_reference_minischeme(source, is_oracle)
+    )
+    interpreted_submission_result = (
+        run_generated_program_with_reference_ilvm_interpreter(
+            program_compiled_by_interpreted_submission
+        )
+    )
+    interpreted_submission_ok = (
+        program_compiled_by_interpreted_submission.ok
+        and matches_reference_behavior(
+            reference_result, interpreted_submission_result
+        )
+    )
+
+    # 3. Use the ILVM compiler produced from compiler.scm to compile P into
+    #    ILVM, then run the resulting ILVM program.
+    program_compiled_by_self_hosted_submission = (
+        compile_with_self_hosted_submitted_compiler_in_reference_ilvm(
+            submitted_compiler_in_ilvm, source
+        )
+    )
+    self_hosted_submission_result = (
+        run_generated_program_with_reference_ilvm_interpreter(
+            program_compiled_by_self_hosted_submission
+        )
+    )
+    self_hosted_submission_ok = (
+        submitted_compiler_in_ilvm.ok
+        and program_compiled_by_self_hosted_submission.ok
+        and matches_reference_behavior(
+            reference_result, self_hosted_submission_result
+        )
+    )
+
+    print(
+        f"{example.name}: "
+        f"interpreted-submission="
+        f"{'PASS' if interpreted_submission_ok else 'FAIL'} "
+        f"self-hosted-submission="
+        f"{'PASS' if self_hosted_submission_ok else 'FAIL'}"
+    )
+    if not interpreted_submission_ok:
+        print(
+            f"  reference={reference_result} "
+            f"interpreted-submission={interpreted_submission_result}"
+        )
+    if not self_hosted_submission_ok:
+        print(
+            f"  reference={reference_result} "
+            f"self-hosted-submission={self_hosted_submission_result}"
+        )
+
+    return interpreted_submission_ok, self_hosted_submission_ok
+
+
 def main() -> int:
-    if not ILVM_REF.is_file():
-        raise VerifierError(f"missing reference ILVM interpreter: {ILVM_REF}")
-    if not MINISCHEME_REF.is_file():
-        raise VerifierError(f"missing reference MiniScheme interpreter: {MINISCHEME_REF}")
-    if not COMPILER_SCM.is_file():
+    """Compile the compiler once, grade every example, and write the reward."""
+
+    if not SUBMITTED_COMPILER.is_file():
         print("missing /app/compiler.scm", file=sys.stderr)
         write_reward(0.0)
         return 1
 
     examples = sorted(EXAMPLES.glob("*.scm"))
-    if not examples:
-        raise VerifierError(f"no MiniScheme examples in {EXAMPLES}")
-
-    compiler_source = COMPILER_SCM.read_text()
+    compiler_source = SUBMITTED_COMPILER.read_text()
     is_oracle = ORACLE_MARKER in compiler_source
-    if is_oracle and not FALLBACK_COMPILER.is_file():
-        raise VerifierError(f"oracle fallback is missing: {FALLBACK_COMPILER}")
 
-    self_hosted_compiler = run_source_compiler(compiler_source, is_oracle)
-    if not self_hosted_compiler.ok:
+    # Prepare path 3 once by compiling compiler.scm into an ILVM compiler.
+    submitted_compiler_in_ilvm = (
+        compile_with_submitted_compiler_in_reference_minischeme(
+            compiler_source, is_oracle
+        )
+    )
+    if not submitted_compiler_in_ilvm.ok:
         print("compiler.scm failed to compile itself; self-hosting cases will fail")
 
-    direct_passes = 0
-    self_hosted_passes = 0
+    interpreted_submission_passes = 0
+    self_hosted_submission_passes = 0
     print("=== per-example results ===")
 
     for example in examples:
-        source = example.read_text()
-        expected = run_minischeme(example, [])
-
-        direct_program = run_source_compiler(source, is_oracle)
-        direct_result = run_compiled_program(direct_program)
-        direct_ok = direct_program.ok and same_behavior(expected, direct_result)
-        direct_passes += int(direct_ok)
-
-        self_hosted_program = run_ilvm_compiler(self_hosted_compiler, source)
-        self_hosted_result = run_compiled_program(self_hosted_program)
-        self_hosted_ok = (
-            self_hosted_compiler.ok
-            and self_hosted_program.ok
-            and same_behavior(expected, self_hosted_result)
+        interpreted_submission_ok, self_hosted_submission_ok = (
+            grade_submitted_compiler_on_example(
+                example, submitted_compiler_in_ilvm, is_oracle
+            )
         )
-        self_hosted_passes += int(self_hosted_ok)
-
-        print(
-            f"{example.name}: "
-            f"direct={'PASS' if direct_ok else 'FAIL'} "
-            f"self-hosted={'PASS' if self_hosted_ok else 'FAIL'}"
-        )
-        if not direct_ok:
-            print(f"  expected={expected} direct={direct_result}")
-        if not self_hosted_ok:
-            print(f"  expected={expected} self-hosted={self_hosted_result}")
+        interpreted_submission_passes += int(interpreted_submission_ok)
+        self_hosted_submission_passes += int(self_hosted_submission_ok)
 
     count = len(examples)
-    direct_score = direct_passes / count
-    self_hosted_score = self_hosted_passes / count
-    reward = 0.5 * direct_score + 0.5 * self_hosted_score
+    interpreted_submission_score = interpreted_submission_passes / count
+    self_hosted_submission_score = self_hosted_submission_passes / count
+    reward = (
+        0.5 * interpreted_submission_score
+        + 0.5 * self_hosted_submission_score
+    )
 
     print(
-        f"direct={direct_score:.4f} "
-        f"self_hosted={self_hosted_score:.4f} "
+        f"interpreted_submission={interpreted_submission_score:.4f} "
+        f"self_hosted_submission={self_hosted_submission_score:.4f} "
         f"reward={reward:.4f}"
     )
     write_reward(reward)

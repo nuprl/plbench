@@ -7,8 +7,8 @@ that is what you are building.
 
 ## 1. Grammar
 
-Terminals are shown in double quotes. `name`, `integer`, `float`, `boolean`,
-and `string` are the lexical classes described in §2. A trailing `...` means
+Terminals are shown in double quotes. `name`, `integer`, `boolean`, and
+`string` are the lexical classes described in §2. A trailing `...` means
 zero or more repetitions; `?` marks an optional item.
 
 ```
@@ -21,7 +21,7 @@ TopForm  ::= Define
 Define   ::= "(" "define" name Expr ")"
            | "(" "define" "(" name name ... ")" Expr ")"
 
-Expr     ::= integer | float | boolean | string | name
+Expr     ::= integer | boolean | string | name
            | "(" ")"
            | VectorDatum
            | "(" "quote" Datum ")"
@@ -40,7 +40,7 @@ Binding  ::= "(" name Expr ")"
 Clause    ::= "(" Expr Expr ")"
 ElseClause ::= "(" "else" Expr ")"
 
-Datum    ::= integer | float | boolean | string | name
+Datum    ::= integer | boolean | string | name
            | "(" Datum ... ")"
            | VectorDatum
 
@@ -61,9 +61,8 @@ Line comments begin with `;` and run to the end of the line.
 Strings are delimited by double quotes and support the escapes `\n`, `\t`,
 `\"`, and `\\`.
 
-Booleans are `#t` and `#f`. Integers are decimal signed integers. Floating-point
-numbers are tokens that contain a `.`. All other non-delimiter atoms are
-symbols.
+Booleans are `#t` and `#f`. Numbers are decimal signed integers. All other
+non-delimiter atoms are symbols.
 
 The quote abbreviation `'x` is parsed as `(quote x)`.
 
@@ -76,7 +75,6 @@ unquoted vector literal as an expression is a runtime type error. Use the
 Runtime values are:
 
 - integers
-- floats
 - booleans
 - strings
 - symbols
@@ -89,7 +87,7 @@ value is truthy.
 
 ## 4. Expressions
 
-Self-evaluating expressions are integers, floats, booleans, and strings.
+Self-evaluating expressions are integers, booleans, and strings.
 
 A symbol expression looks up the symbol in the current lexical environment.
 Referencing a symbol with no binding — no enclosing lexical binding, no
@@ -144,8 +142,8 @@ level. They install a binding and return the defined name as a symbol.
 ## 6. Builtins
 
 The forms below describe builtin arity and required argument types after
-operand evaluation. Metavariables are: `v` for any value, `n` for a number,
-`i` for an integer, `b` for a boolean, `s` for a string, `sym` for a symbol,
+operand evaluation. Metavariables are: `v` for any value, `n` and `i` for an
+integer, `b` for a boolean, `s` for a string, `sym` for a symbol,
 `xs` for a proper list, `vec` for a vector, and `proc` for a procedure.
 Numbered metavariables have the same type, and `...` means zero or more
 additional arguments of the preceding kind.
@@ -158,9 +156,13 @@ Arithmetic:
   `(<= n1 n2 n ...)`, `(>= n1 n2 n ...)`: two or more numeric arguments,
   returning a boolean
 
+All arithmetic produces integers. Division is integer division truncated toward
+zero; unary `(/ n)` computes the integer quotient `1 / n`. Division by zero is
+a runtime error.
+
 Predicates:
 
-- `(number? v)`, `(integer? v)`, `(float? v)`, `(boolean? v)`, `(string? v)`,
+- `(number? v)`, `(integer? v)`, `(boolean? v)`, `(string? v)`,
   `(symbol? v)`
 - `(procedure? v)`, `(null? v)`, `(pair? v)`, `(list? v)`, `(vector? v)`
 
@@ -203,8 +205,8 @@ Other:
 - `(apply proc xs)`: applies `proc` to the arguments in `xs`
 - `(display v)`: writes `v` followed by a newline to stdout and returns
   `#f`; strings are written without surrounding quotes or escape re-encoding,
-  and other values use the standard printed representation (integers and
-  floats in decimal, `#t`/`#f`, symbols by name, proper lists as `(a b c)`,
+  and other values use the standard printed representation (integers in
+  decimal, `#t`/`#f`, symbols by name, proper lists as `(a b c)`,
   vectors as `#(a b c)`)
 - `(error s)`: raises a runtime error with message `s`
 
