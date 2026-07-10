@@ -1,0 +1,5 @@
+within-first: reachable
+within-second-reverse: reachable
+across-realms: unreachable
+broad-source: reachable
+impossible-target: unreachable

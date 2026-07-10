@@ -1,0 +1,23 @@
+# Network: Destinations 10.0.0.1 through 10.0.0.4 form a processing chain.
+# Destination port 1000 marks policy ingress and 1001 marks policy egress;
+# topology restores port 1000 after each complete transfer.
+# Policy: Each ingress address advances to its successor and marks egress.
+# Topology: Egress packets at the three successor addresses return to ingress phase.
+# Property end-to-end: Three complete policy/topology hops reach 10.0.0.4:1000.
+# Property first-arrival: The first boundary state is 10.0.0.2:1000.
+# Property no-half-hop-observation: Reachability never stops between policy and topology.
+# Property wrong-start-phase: Port 1001 at the first address matches no policy rule.
+# Property no-second-half-state: 10.0.0.3:1001 is also hidden inside a complete hop.
+policy =
+    (filter(dst_ip = 10.0.0.1 & dst_port = 1000) . dst_ip <- 10.0.0.2 . dst_port <- 1001)
+  + (filter(dst_ip = 10.0.0.2 & dst_port = 1000) . dst_ip <- 10.0.0.3 . dst_port <- 1001)
+  + (filter(dst_ip = 10.0.0.3 & dst_port = 1000) . dst_ip <- 10.0.0.4 . dst_port <- 1001);
+topology =
+    (filter(dst_ip = 10.0.0.2 & dst_port = 1001) . dst_port <- 1000)
+  + (filter(dst_ip = 10.0.0.3 & dst_port = 1001) . dst_port <- 1000)
+  + (filter(dst_ip = 10.0.0.4 & dst_port = 1001) . dst_port <- 1000);
+check end-to-end: dst_ip = 10.0.0.1 & dst_port = 1000 => dst_ip = 10.0.0.4 & dst_port = 1000;
+check first-arrival: dst_ip = 10.0.0.1 & dst_port = 1000 => dst_ip = 10.0.0.2 & dst_port = 1000;
+check no-half-hop-observation: dst_ip = 10.0.0.1 & dst_port = 1000 => dst_ip = 10.0.0.2 & dst_port = 1001;
+check wrong-start-phase: dst_ip = 10.0.0.1 & dst_port = 1001 => dst_ip = 10.0.0.4;
+check no-second-half-state: dst_ip = 10.0.0.1 & dst_port = 1000 => dst_ip = 10.0.0.3 & dst_port = 1001;

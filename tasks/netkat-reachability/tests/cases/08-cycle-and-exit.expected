@@ -1,0 +1,5 @@
+cycle-to-exit: reachable
+second-back-to-first: reachable
+exit-back-to-cycle: unreachable
+cycle-self: reachable
+isolated: unreachable

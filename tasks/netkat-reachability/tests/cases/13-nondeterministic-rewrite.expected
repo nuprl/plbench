@@ -1,0 +1,5 @@
+first-public-port: reachable
+second-public-port: reachable
+private-port-not-output: unreachable
+either-public-port: reachable
+unrelated-public-address: unreachable

@@ -1,0 +1,20 @@
+# Network: Destination 10.0.0.1 can follow equal-cost paths through 10.0.0.2
+# or 10.0.0.3; either path reaches 10.0.0.4. Address 10.0.0.99 is isolated.
+# Policy: Nondeterministic union selects and advances along either address path.
+# Topology: id because logical next-hop transitions are represented by policy.
+# Property left-path: The left next hop is possible.
+# Property right-path: The right next hop is possible.
+# Property destination: Either branch eventually reaches the common endpoint.
+# Property isolated: No branch reaches the unused address.
+# Property untouched-source-port: Forwarding preserves an arbitrary constrained source port.
+policy =
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.4)
+  + (filter(dst_ip = 10.0.0.3) . dst_ip <- 10.0.0.4);
+topology = id;
+check left-path: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.2;
+check right-path: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.3;
+check destination: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.4;
+check isolated: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.99;
+check untouched-source-port: dst_ip = 10.0.0.1 & src_port = 49152 => dst_ip = 10.0.0.4 & src_port = 49152;

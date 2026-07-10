@@ -1,0 +1,5 @@
+full-pipeline: reachable
+no-old-port-at-end: unreachable
+intermediate-new-port: reachable
+intermediate-old-port: unreachable
+unnormalized-middle-stuck: unreachable

@@ -1,0 +1,5 @@
+multi-link-one-hop: reachable
+second-suffix: reachable
+third-zero-link: reachable
+intermediate-not-exposed: unreachable
+completed-cannot-restart: unreachable

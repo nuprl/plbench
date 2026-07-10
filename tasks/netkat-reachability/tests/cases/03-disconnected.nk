@@ -1,0 +1,20 @@
+# Network: Destination-address transitions form two disconnected realms:
+# 10.0.0.1--10.0.0.2 and 10.0.1.1--10.0.1.2.
+# Policy: id leaves all four headers unchanged before each topology step.
+# Topology: Each address pair is connected bidirectionally; there are no cross-realm transitions.
+# Property within-first: The first address reaches its peer.
+# Property within-second-reverse: The second realm is connected in the reverse direction.
+# Property across-realms: No sequence connects the first realm to the second.
+# Property broad-source: One member of the disjunctive source, 10.0.1.1, reaches 10.0.1.2.
+# Property impossible-target: A destination IP cannot equal two distinct addresses simultaneously.
+policy = id;
+topology =
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.1)
+  + (filter(dst_ip = 10.0.1.1) . dst_ip <- 10.0.1.2)
+  + (filter(dst_ip = 10.0.1.2) . dst_ip <- 10.0.1.1);
+check within-first: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.2;
+check within-second-reverse: dst_ip = 10.0.1.2 => dst_ip = 10.0.1.1;
+check across-realms: dst_ip = 10.0.0.1 => dst_ip = 10.0.1.2;
+check broad-source: dst_ip = 10.0.0.1 | dst_ip = 10.0.1.1 => dst_ip = 10.0.1.2;
+check impossible-target: true => dst_ip = 10.0.0.1 & dst_ip = 10.0.1.2;

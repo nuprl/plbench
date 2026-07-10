@@ -1,0 +1,19 @@
+# Network: A port-address translator maps private flow 10.0.0.8:40000 to
+# public address 203.0.113.8 and nondeterministically chooses port 50000 or 50001.
+# Policy: Union contains the two PAT mappings plus a drop branch.
+# Topology: id.
+# Property first-public-port: One translation uses public source port 50000.
+# Property second-public-port: Another execution uses source port 50001.
+# Property private-port-not-output: No completed translation keeps port 40000 with the public IP.
+# Property either-public-port: A disjunctive property accepts either translation.
+# Property unrelated-public-address: The drop branch cannot produce another public IP.
+policy =
+    (filter(src_ip = 10.0.0.8 & src_port = 40000) . src_ip <- 203.0.113.8 . src_port <- 50000)
+  + (filter(src_ip = 10.0.0.8 & src_port = 40000) . src_ip <- 203.0.113.8 . src_port <- 50001)
+  + (filter(src_ip = 10.0.0.8) . drop);
+topology = id;
+check first-public-port: src_ip = 10.0.0.8 & src_port = 40000 => src_ip = 203.0.113.8 & src_port = 50000;
+check second-public-port: src_ip = 10.0.0.8 & src_port = 40000 => src_ip = 203.0.113.8 & src_port = 50001;
+check private-port-not-output: src_ip = 10.0.0.8 & src_port = 40000 => src_ip = 203.0.113.8 & src_port = 40000;
+check either-public-port: src_ip = 10.0.0.8 & src_port = 40000 => src_ip = 203.0.113.8 & (src_port = 50000 | src_port = 50001);
+check unrelated-public-address: src_ip = 10.0.0.8 => src_ip = 203.0.113.9;

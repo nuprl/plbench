@@ -1,0 +1,16 @@
+# Network: A source NAT maps private client 10.0.0.5 to public address 203.0.113.5
+# while forwarding traffic destined for 198.51.100.80.
+# Policy: Matching private-client traffic rewrites only the source IP.
+# Topology: id; the NAT transformation is the complete logical hop.
+# Property private-becomes-public: The private source is translated.
+# Property zero-hop-private-class: The original private flow class is reachable at zero hops.
+# Property destination-preserved: NAT does not change the destination IP.
+# Property ports-preserved: NAT does not change either constrained transport port.
+# Property other-private-host: A different private source does not match the NAT rule.
+policy = filter(src_ip = 10.0.0.5 & dst_ip = 198.51.100.80) . src_ip <- 203.0.113.5;
+topology = id;
+check private-becomes-public: src_ip = 10.0.0.5 & dst_ip = 198.51.100.80 => src_ip = 203.0.113.5 & dst_ip = 198.51.100.80;
+check zero-hop-private-class: src_ip = 10.0.0.5 & dst_ip = 198.51.100.80 => src_ip = 10.0.0.5 & dst_ip = 198.51.100.80;
+check destination-preserved: src_ip = 10.0.0.5 & dst_ip = 198.51.100.80 => src_ip = 203.0.113.5 & dst_ip = 198.51.100.80;
+check ports-preserved: src_ip = 10.0.0.5 & dst_ip = 198.51.100.80 & src_port = 50000 & dst_port = 443 => src_ip = 203.0.113.5 & src_port = 50000 & dst_port = 443;
+check other-private-host: src_ip = 10.0.0.6 & dst_ip = 198.51.100.80 => src_ip = 203.0.113.5;

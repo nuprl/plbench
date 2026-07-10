@@ -1,0 +1,14 @@
+# Network: No forwarding rules or physical links exist. The packet universe is
+# still the full set of four-header IPv4/TCP-or-UDP tuples.
+# Policy: drop rejects every packet.
+# Topology: drop has no transitions.
+# Property overlap: Some packet already has destination port 443, so zero hops suffice.
+# Property same-flow: The source and destination predicates describe the same flow class.
+# Property different-port: A packet cannot initially have both destination ports and no hop exists.
+# Property different-address: A packet cannot initially have both destination IPs and no hop exists.
+policy = drop;
+topology = drop;
+check overlap: true => dst_port = 443;
+check same-flow: src_ip = 192.0.2.1 & dst_ip = 198.51.100.1 => src_ip = 192.0.2.1 & dst_ip = 198.51.100.1;
+check different-port: dst_port = 80 => dst_port = 443;
+check different-address: dst_ip = 192.0.2.10 => dst_ip = 192.0.2.11;

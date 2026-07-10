@@ -1,0 +1,16 @@
+# Network: Gateway 203.0.113.20 forwards to database 10.1.0.20. Only client
+# 192.0.2.10 may use PostgreSQL; every client may use the health-check port.
+# Policy: A source-sensitive firewall admits authorized database or health-check traffic.
+# Topology: Admitted gateway traffic has its destination rewritten to the database.
+# Property authorized-db: The authorized client reaches PostgreSQL.
+# Property unauthorized-db: Another client is blocked from PostgreSQL.
+# Property health-open: An arbitrary source can reach the health-check service.
+# Property authorized-wrong-port: Even the authorized client is blocked on SSH.
+# Property client-address-preserved: The firewall and delivery step preserve source IP.
+policy = filter(dst_ip = 203.0.113.20 & ((src_ip = 192.0.2.10 & dst_port = 5432) | dst_port = 8080));
+topology = filter(dst_ip = 203.0.113.20) . dst_ip <- 10.1.0.20;
+check authorized-db: src_ip = 192.0.2.10 & dst_ip = 203.0.113.20 & dst_port = 5432 => dst_ip = 10.1.0.20 & dst_port = 5432;
+check unauthorized-db: src_ip = 192.0.2.11 & dst_ip = 203.0.113.20 & dst_port = 5432 => dst_ip = 10.1.0.20;
+check health-open: dst_ip = 203.0.113.20 & dst_port = 8080 => dst_ip = 10.1.0.20 & dst_port = 8080;
+check authorized-wrong-port: src_ip = 192.0.2.10 & dst_ip = 203.0.113.20 & dst_port = 22 => dst_ip = 10.1.0.20;
+check client-address-preserved: src_ip = 198.51.100.200 & dst_ip = 203.0.113.20 & dst_port = 8080 => src_ip = 198.51.100.200 & dst_ip = 10.1.0.20;

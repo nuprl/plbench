@@ -1,0 +1,21 @@
+# Network: While source port is 1000, destinations 10.0.0.1, .2, and .3 are
+# internal stages. Policy may iterate internally before emitting 10.0.0.4;
+# topology then changes source port to 1001, marking the packet outside.
+# Policy: A starred subpolicy takes zero or more .1-.2/.2-.3 steps, then requires .3.
+# Topology: Every emitted inside packet changes the phase-encoding source port.
+# Property first-through-star: Destination .1 needs two inner iterations before emission.
+# Property second-through-star: Destination .2 needs one inner iteration.
+# Property third-zero-inner: Destination .3 uses zero inner iterations.
+# Property intermediate-not-output: The complete policy cannot output .3 with port 1000.
+# Property outside-stuck: Source port 1001 fails the final inside filter.
+policy =
+  (((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+    + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3))*
+   . filter(dst_ip = 10.0.0.3 & src_port = 1000)
+   . dst_ip <- 10.0.0.4);
+topology = filter(src_port = 1000) . src_port <- 1001;
+check first-through-star: dst_ip = 10.0.0.1 & src_port = 1000 => dst_ip = 10.0.0.4 & src_port = 1001;
+check second-through-star: dst_ip = 10.0.0.2 & src_port = 1000 => dst_ip = 10.0.0.4 & src_port = 1001;
+check third-zero-inner: dst_ip = 10.0.0.3 & src_port = 1000 => dst_ip = 10.0.0.4 & src_port = 1001;
+check intermediate-not-output: dst_ip = 10.0.0.1 & src_port = 1000 => dst_ip = 10.0.0.3 & src_port = 1000;
+check outside-stuck: dst_ip = 10.0.0.1 & src_port = 1001 => dst_ip = 10.0.0.4;

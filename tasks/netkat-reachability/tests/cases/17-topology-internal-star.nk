@@ -1,0 +1,20 @@
+# Network: Destinations 10.0.0.1-.2-.3 are physical micro-links traversed
+# inside topology. Source port 2000 marks start and 2001 marks completion.
+# Policy: Only start-phase packets pass unchanged; completed packets cannot re-enter.
+# Topology: Address transitions iterate internally, then destination .3 changes the phase port.
+# Property multi-link-one-hop: Destination .1 reaches .3/completed within one topology evaluation.
+# Property second-suffix: Destination .2 needs one internal topology step.
+# Property third-zero-link: Destination .3 uses zero star iterations before completion.
+# Property intermediate-not-exposed: The topology expression must finish, not expose .2/start.
+# Property completed-cannot-restart: A completed packet at .1 is rejected by policy.
+policy = filter(src_port = 2000);
+topology =
+  (((filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+    + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3))*
+   . filter(dst_ip = 10.0.0.3)
+   . src_port <- 2001);
+check multi-link-one-hop: dst_ip = 10.0.0.1 & src_port = 2000 => dst_ip = 10.0.0.3 & src_port = 2001;
+check second-suffix: dst_ip = 10.0.0.2 & src_port = 2000 => dst_ip = 10.0.0.3 & src_port = 2001;
+check third-zero-link: dst_ip = 10.0.0.3 & src_port = 2000 => dst_ip = 10.0.0.3 & src_port = 2001;
+check intermediate-not-exposed: dst_ip = 10.0.0.1 & src_port = 2000 => dst_ip = 10.0.0.2 & src_port = 2000;
+check completed-cannot-restart: dst_ip = 10.0.0.1 & src_port = 2001 => dst_ip = 10.0.0.3;

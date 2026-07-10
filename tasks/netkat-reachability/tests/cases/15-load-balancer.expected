@@ -1,0 +1,6 @@
+worker-one: reachable
+worker-two: reachable
+public-port-not-preserved: unreachable
+wrong-input-port: unreachable
+source-flow-preserved: reachable
+unused-worker: unreachable

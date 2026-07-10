@@ -1,0 +1,8 @@
+port-preserved: reachable
+port-cannot-change: unreachable
+negated-source: reachable
+conjunction-empty: unreachable
+de-morgan-shape: reachable
+vast-complement: reachable
+zero-port-boundary: reachable
+ipv4-boundaries-distinct: unreachable

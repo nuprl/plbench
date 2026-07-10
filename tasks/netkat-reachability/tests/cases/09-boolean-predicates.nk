@@ -1,0 +1,21 @@
+# Network: A rewrite maps destination 192.0.2.1 to 192.0.2.2 while preserving ports.
+# Policy: The single rewrite applies to every transport flow for that destination.
+# Topology: id.
+# Property port-preserved: A constrained high destination port survives the rewrite.
+# Property port-cannot-change: Port 80 cannot become 443.
+# Property negated-source: The source complement of 192.0.2.1 includes 192.0.2.2 itself.
+# Property conjunction-empty: No packet has destination port 80 and 443 simultaneously.
+# Property de-morgan-shape: A 192.0.2.1:80 packet initially satisfies !(192.0.2.2 | port 443).
+# Property vast-complement: The full IPv4 domain contains addresses other than two excluded constants.
+# Property zero-port-boundary: Port 0 is a valid 16-bit port and is preserved by the rewrite.
+# Property ipv4-boundaries-distinct: The minimum and maximum IPv4 addresses are distinct and source IP is unchanged.
+policy = filter(dst_ip = 192.0.2.1) . dst_ip <- 192.0.2.2;
+topology = id;
+check port-preserved: dst_ip = 192.0.2.1 & dst_port = 65000 => dst_ip = 192.0.2.2 & dst_port = 65000;
+check port-cannot-change: dst_ip = 192.0.2.1 & dst_port = 80 => dst_ip = 192.0.2.2 & dst_port = 443;
+check negated-source: !(dst_ip = 192.0.2.1) => dst_ip = 192.0.2.2;
+check conjunction-empty: true => dst_port = 80 & dst_port = 443;
+check de-morgan-shape: dst_ip = 192.0.2.1 & dst_port = 80 => !(dst_ip = 192.0.2.2 | dst_port = 443);
+check vast-complement: !(dst_ip = 192.0.2.1 | dst_ip = 192.0.2.2) => !(dst_ip = 192.0.2.1 | dst_ip = 192.0.2.2);
+check zero-port-boundary: dst_ip = 192.0.2.1 & src_port = 0 => dst_ip = 192.0.2.2 & src_port = 0;
+check ipv4-boundaries-distinct: src_ip = 0.0.0.0 => src_ip = 255.255.255.255;

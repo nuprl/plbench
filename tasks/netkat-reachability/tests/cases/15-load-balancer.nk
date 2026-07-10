@@ -1,0 +1,20 @@
+# Network: Public HTTPS VIP 203.0.113.100 balances to workers 10.0.1.10:8443
+# and 10.0.1.11:8443. Address 10.0.1.99 is unused.
+# Policy: Nondeterministic branches select a worker and rewrite destination port.
+# Topology: id.
+# Property worker-one: One execution reaches the first worker's backend port.
+# Property worker-two: Another reaches the second worker.
+# Property public-port-not-preserved: Workers do not receive destination port 443.
+# Property wrong-input-port: VIP traffic on port 80 matches no load-balancer rule.
+# Property source-flow-preserved: A constrained source IP and port survive balancing.
+# Property unused-worker: No branch reaches the unused address.
+policy =
+    (filter(dst_ip = 203.0.113.100 & dst_port = 443) . dst_ip <- 10.0.1.10 . dst_port <- 8443)
+  + (filter(dst_ip = 203.0.113.100 & dst_port = 443) . dst_ip <- 10.0.1.11 . dst_port <- 8443);
+topology = id;
+check worker-one: dst_ip = 203.0.113.100 & dst_port = 443 => dst_ip = 10.0.1.10 & dst_port = 8443;
+check worker-two: dst_ip = 203.0.113.100 & dst_port = 443 => dst_ip = 10.0.1.11 & dst_port = 8443;
+check public-port-not-preserved: dst_ip = 203.0.113.100 & dst_port = 443 => (dst_ip = 10.0.1.10 | dst_ip = 10.0.1.11) & dst_port = 443;
+check wrong-input-port: dst_ip = 203.0.113.100 & dst_port = 80 => dst_ip = 10.0.1.10 | dst_ip = 10.0.1.11;
+check source-flow-preserved: src_ip = 198.51.100.42 & src_port = 55000 & dst_ip = 203.0.113.100 & dst_port = 443 => src_ip = 198.51.100.42 & src_port = 55000 & dst_ip = 10.0.1.10;
+check unused-worker: dst_ip = 203.0.113.100 => dst_ip = 10.0.1.99;

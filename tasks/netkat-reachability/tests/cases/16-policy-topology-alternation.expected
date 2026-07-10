@@ -1,0 +1,5 @@
+end-to-end: reachable
+first-arrival: reachable
+no-half-hop-observation: unreachable
+wrong-start-phase: unreachable
+no-second-half-state: unreachable

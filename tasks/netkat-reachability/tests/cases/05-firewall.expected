@@ -1,0 +1,5 @@
+authorized-db: reachable
+unauthorized-db: unreachable
+health-open: reachable
+authorized-wrong-port: unreachable
+client-address-preserved: reachable

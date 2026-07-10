@@ -1,0 +1,5 @@
+left-path: reachable
+right-path: reachable
+destination: reachable
+isolated: unreachable
+untouched-source-port: reachable

@@ -1,0 +1,20 @@
+# Network: Clients 192.0.2.10 and 192.0.2.20 share virtual destination
+# 203.0.113.50 but are assigned isolated backends 10.10.0.10 and 10.20.0.20.
+# Policy: Source-sensitive rules rewrite only the destination to the matching backend.
+# Topology: id.
+# Property first-delivery: The first client reaches its assigned backend.
+# Property second-delivery: The second client reaches its assigned backend.
+# Property first-cannot-cross: The first client cannot reach the second backend.
+# Property second-cannot-cross: The second client cannot reach the first backend.
+# Property broad-destination: With source unconstrained, some virtual-IP packet reaches either backend.
+# Property source-preserved: The first client's source address survives delivery.
+policy =
+    (filter(src_ip = 192.0.2.10 & dst_ip = 203.0.113.50) . dst_ip <- 10.10.0.10)
+  + (filter(src_ip = 192.0.2.20 & dst_ip = 203.0.113.50) . dst_ip <- 10.20.0.20);
+topology = id;
+check first-delivery: src_ip = 192.0.2.10 & dst_ip = 203.0.113.50 => dst_ip = 10.10.0.10;
+check second-delivery: src_ip = 192.0.2.20 & dst_ip = 203.0.113.50 => dst_ip = 10.20.0.20;
+check first-cannot-cross: src_ip = 192.0.2.10 & dst_ip = 203.0.113.50 => dst_ip = 10.20.0.20;
+check second-cannot-cross: src_ip = 192.0.2.20 & dst_ip = 203.0.113.50 => dst_ip = 10.10.0.10;
+check broad-destination: dst_ip = 203.0.113.50 => dst_ip = 10.10.0.10 | dst_ip = 10.20.0.20;
+check source-preserved: src_ip = 192.0.2.10 & dst_ip = 203.0.113.50 => src_ip = 192.0.2.10 & dst_ip = 10.10.0.10;

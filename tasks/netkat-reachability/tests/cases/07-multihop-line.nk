@@ -1,0 +1,20 @@
+# Network: Destination addresses form the directed service chain
+# 10.0.0.1 -> 10.0.0.2 -> 10.0.0.3 -> 10.0.0.4 -> 10.0.0.5.
+# Policy: Each address forwards to its successor; the final address has no rule.
+# Topology: id, so one outer iteration advances one service-chain stage.
+# Property end-to-end: Four iterations reach the final service.
+# Property middle-prefix: The first address reaches the middle service.
+# Property suffix: The middle service reaches the final service.
+# Property reverse: The directed chain cannot be traversed backward.
+# Property unrelated-address: No transition reaches 203.0.113.99.
+policy =
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.3) . dst_ip <- 10.0.0.4)
+  + (filter(dst_ip = 10.0.0.4) . dst_ip <- 10.0.0.5);
+topology = id;
+check end-to-end: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.5;
+check middle-prefix: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.3;
+check suffix: dst_ip = 10.0.0.3 => dst_ip = 10.0.0.5;
+check reverse: dst_ip = 10.0.0.5 => dst_ip = 10.0.0.1;
+check unrelated-address: dst_ip = 10.0.0.1 => dst_ip = 203.0.113.99;

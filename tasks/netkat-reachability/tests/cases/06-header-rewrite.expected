@@ -1,0 +1,5 @@
+private-becomes-public: reachable
+zero-hop-private-class: reachable
+destination-preserved: reachable
+ports-preserved: reachable
+other-private-host: unreachable

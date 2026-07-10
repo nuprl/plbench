@@ -1,0 +1,5 @@
+direct: reachable
+transitive: reachable
+reverse: unreachable
+disconnected: unreachable
+destination-zero-hop: reachable

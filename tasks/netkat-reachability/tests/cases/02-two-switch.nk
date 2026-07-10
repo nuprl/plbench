@@ -1,0 +1,15 @@
+# Network: A public virtual IP 203.0.113.10 fronts internal web server 10.0.0.10.
+# Policy: Traffic to the virtual IP is admitted only on HTTP and HTTPS ports.
+# Topology: Admitted traffic is delivered by rewriting the destination to the internal server.
+# Property https-delivery: HTTPS traffic reaches the internal server unchanged in port.
+# Property http-delivery: HTTP traffic also reaches the internal server.
+# Property ssh-blocked: SSH fails the admission policy and is not delivered.
+# Property source-preserved: Delivery does not rewrite the public client's source address.
+# Property wrong-backend: No transition leads to the unrelated internal server 10.0.0.11.
+policy = filter(dst_ip = 203.0.113.10 & (dst_port = 80 | dst_port = 443));
+topology = filter(dst_ip = 203.0.113.10) . dst_ip <- 10.0.0.10;
+check https-delivery: src_ip = 192.0.2.5 & dst_ip = 203.0.113.10 & dst_port = 443 => src_ip = 192.0.2.5 & dst_ip = 10.0.0.10 & dst_port = 443;
+check http-delivery: dst_ip = 203.0.113.10 & dst_port = 80 => dst_ip = 10.0.0.10 & dst_port = 80;
+check ssh-blocked: dst_ip = 203.0.113.10 & dst_port = 22 => dst_ip = 10.0.0.10;
+check source-preserved: src_ip = 198.51.100.7 & dst_ip = 203.0.113.10 & dst_port = 443 => src_ip = 198.51.100.7 & dst_ip = 10.0.0.10;
+check wrong-backend: dst_ip = 203.0.113.10 & dst_port = 80 => dst_ip = 10.0.0.11;

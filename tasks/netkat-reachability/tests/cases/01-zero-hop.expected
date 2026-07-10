@@ -1,0 +1,4 @@
+overlap: reachable
+same-flow: reachable
+different-port: unreachable
+different-address: unreachable

@@ -1,0 +1,20 @@
+# Network: Destination addresses 10.0.0.1, .2, and .3 form a directed cycle;
+# 10.0.0.3 additionally has an exit to 10.0.0.4. Address 10.0.0.5 is isolated.
+# Policy: Union provides the cycle edges and the nondeterministic exit.
+# Topology: id; each policy execution is one logical forwarding edge.
+# Property cycle-to-exit: A packet can circle and then choose the exit.
+# Property second-back-to-first: The cycle allows 10.0.0.2 to reach 10.0.0.1.
+# Property exit-back-to-cycle: The exit is a sink and cannot return.
+# Property cycle-self: Reflexivity and the nonempty cycle both reach the starting address.
+# Property isolated: The cycle cannot reach 10.0.0.5.
+policy =
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2)
+  + (filter(dst_ip = 10.0.0.2) . dst_ip <- 10.0.0.3)
+  + (filter(dst_ip = 10.0.0.3) . dst_ip <- 10.0.0.1)
+  + (filter(dst_ip = 10.0.0.3) . dst_ip <- 10.0.0.4);
+topology = id;
+check cycle-to-exit: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.4;
+check second-back-to-first: dst_ip = 10.0.0.2 => dst_ip = 10.0.0.1;
+check exit-back-to-cycle: dst_ip = 10.0.0.4 => dst_ip = 10.0.0.2;
+check cycle-self: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.1;
+check isolated: dst_ip = 10.0.0.1 => dst_ip = 10.0.0.5;

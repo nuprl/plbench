@@ -1,0 +1,20 @@
+# Network: Address-processing stages 10.0.0.1, .2, and .3 use destination port
+# 80 as input and 443 as the normalized service port.
+# Policy: The first branch changes address then port. The second advances only
+# packets already normalized. A dead branch assigns 443 and then filters for 80.
+# Topology: id.
+# Property full-pipeline: Address .1 on port 80 becomes .2:443 then .3:443.
+# Property no-old-port-at-end: The successful pipeline cannot leave port 80.
+# Property intermediate-new-port: The first iteration ends at .2:443.
+# Property intermediate-old-port: Sequencing prevents an output at .2:80.
+# Property unnormalized-middle-stuck: A packet already at .2:80 matches no live branch.
+policy =
+    (filter(dst_ip = 10.0.0.1) . dst_ip <- 10.0.0.2 . dst_port <- 443)
+  + (filter(dst_ip = 10.0.0.2 & dst_port = 443) . dst_ip <- 10.0.0.3)
+  + (dst_port <- 443 . filter(dst_port = 80) . dst_ip <- 10.0.0.3);
+topology = id;
+check full-pipeline: dst_ip = 10.0.0.1 & dst_port = 80 => dst_ip = 10.0.0.3 & dst_port = 443;
+check no-old-port-at-end: dst_ip = 10.0.0.1 & dst_port = 80 => dst_ip = 10.0.0.3 & dst_port = 80;
+check intermediate-new-port: dst_ip = 10.0.0.1 & dst_port = 80 => dst_ip = 10.0.0.2 & dst_port = 443;
+check intermediate-old-port: dst_ip = 10.0.0.1 & dst_port = 80 => dst_ip = 10.0.0.2 & dst_port = 80;
+check unnormalized-middle-stuck: dst_ip = 10.0.0.2 & dst_port = 80 => dst_ip = 10.0.0.3;

@@ -1,0 +1,5 @@
+first-through-star: reachable
+second-through-star: reachable
+third-zero-inner: reachable
+intermediate-not-output: unreachable
+outside-stuck: unreachable

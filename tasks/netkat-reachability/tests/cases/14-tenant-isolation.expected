@@ -1,0 +1,6 @@
+first-delivery: reachable
+second-delivery: reachable
+first-cannot-cross: unreachable
+second-cannot-cross: unreachable
+broad-destination: reachable
+source-preserved: reachable

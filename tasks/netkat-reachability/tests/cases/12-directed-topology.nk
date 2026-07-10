@@ -1,0 +1,18 @@
+# Network: Physical destination rewrites form one-way links
+# 172.16.0.1 -> 172.16.0.2 -> 172.16.0.3; 172.16.0.4 is disconnected.
+# Policy: id admits every packet to topology without changing headers.
+# Topology: Only the two directed address transitions exist.
+# Property direct: The first address reaches the second in one hop.
+# Property transitive: The first reaches the third in two repetitions.
+# Property reverse: The third cannot reach the first.
+# Property disconnected: The first cannot reach the fourth.
+# Property destination-zero-hop: The third reaches itself without an outgoing edge.
+policy = id;
+topology =
+    (filter(dst_ip = 172.16.0.1) . dst_ip <- 172.16.0.2)
+  + (filter(dst_ip = 172.16.0.2) . dst_ip <- 172.16.0.3);
+check direct: dst_ip = 172.16.0.1 => dst_ip = 172.16.0.2;
+check transitive: dst_ip = 172.16.0.1 => dst_ip = 172.16.0.3;
+check reverse: dst_ip = 172.16.0.3 => dst_ip = 172.16.0.1;
+check disconnected: dst_ip = 172.16.0.1 => dst_ip = 172.16.0.4;
+check destination-zero-hop: dst_ip = 172.16.0.3 => dst_ip = 172.16.0.3;
