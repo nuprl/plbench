@@ -1,6 +1,6 @@
 (executable
  (name verifier)
  (modules fixtures command verifier)
- (libraries str yaml)
+ (libraries str unix yaml)
  (preprocess
   (pps ppx_deriving_yaml)))

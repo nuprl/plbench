@@ -1,6 +1,6 @@
 module Paths = struct
   let migrator = "/app/migrate"
-  let gtlc = "/app/gtlc/_build/default/gtlc.exe"
+  let environment_gtlc = "/app/gtlc/_build/default/gtlc.exe"
   let cases = "/tests/cases.yaml"
   let reward = "/logs/verifier/reward.txt"
 end
@@ -27,12 +27,39 @@ let with_source_file prefix source action =
 
 let write_reward score = write_file Paths.reward (Printf.sprintf "%.6f\n" score)
 
-let verify_gtlc () =
-  let actual = Digest.file Paths.gtlc |> Digest.to_hex in
-  if not (String.equal actual expected_gtlc_md5) then
-    failwith
-      (Printf.sprintf "trusted GTLC executable has MD5 %s; expected %s" actual
-         expected_gtlc_md5)
+let copy_file source destination =
+  let input_channel = open_in_bin source in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input_channel)
+    (fun () ->
+      let output_channel = open_out_bin destination in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr output_channel)
+        (fun () ->
+          let buffer = Bytes.create 65_536 in
+          let rec copy () =
+            match input input_channel buffer 0 (Bytes.length buffer) with
+            | 0 -> ()
+            | count ->
+                output output_channel buffer 0 count;
+                copy ()
+          in
+          copy ()))
+
+let install_trusted_gtlc () =
+  let path = Filename.temp_file "trusted-gtlc-" ".exe" in
+  try
+    copy_file Paths.environment_gtlc path;
+    let actual = Digest.file path |> Digest.to_hex in
+    if not (String.equal actual expected_gtlc_md5) then
+      failwith
+        (Printf.sprintf "trusted GTLC executable has MD5 %s; expected %s" actual
+           expected_gtlc_md5);
+    Unix.chmod path 0o500;
+    path
+  with exception_ ->
+    remove_file path;
+    raise exception_
 
 let has_hole context =
   try
@@ -59,21 +86,20 @@ let show_outcome = function
   | Runtime_failure -> "runtime failure"
   | Divergence -> "divergence"
 
-let execute source =
-  verify_gtlc ();
+let execute ~gtlc source =
   with_source_file "gtlc-exec-" source (fun path ->
       match
-        Command.run ~timeout_seconds:execution_timeout_seconds
-          ~executable:Paths.gtlc ~arguments:[ "exec"; path ]
+        Command.run ~timeout_seconds:execution_timeout_seconds ~executable:gtlc
+          ~arguments:[ "exec"; path ]
       with
       | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
       | Ok { status = 0; stdout; _ } -> Value (String.trim stdout)
       | Ok { status = 124; _ } -> Divergence
       | Ok _ -> Runtime_failure)
 
-let outcomes case expression =
+let outcomes ~gtlc case expression =
   List.map
-    (fun context -> execute (fill_context context expression))
+    (fun context -> execute ~gtlc (fill_context context expression))
     case.Fixtures.contexts
 
 let run_migrator input_path =
@@ -88,13 +114,12 @@ let run_migrator input_path =
            (Command.diagnostic output))
   | Ok output -> Ok output.stdout
 
-let check_migration original migrated =
-  verify_gtlc ();
+let check_migration ~gtlc original migrated =
   with_source_file "gtlc-original-" original (fun original_path ->
       with_source_file "gtlc-migrated-" migrated (fun migrated_path ->
           match
             Command.run ~timeout_seconds:migration_timeout_seconds
-              ~executable:Paths.gtlc
+              ~executable:gtlc
               ~arguments:[ "is-migration"; original_path; migrated_path ]
           with
           | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
@@ -121,8 +146,8 @@ let first_difference expected actual =
   in
   search 1 expected actual
 
-let grade (case : Fixtures.case) =
-  let expected = outcomes case case.program in
+let grade ~gtlc (case : Fixtures.case) =
+  let expected = outcomes ~gtlc case case.program in
   with_source_file
     ("gtlc-challenge-" ^ case.name ^ "-")
     case.program
@@ -130,10 +155,10 @@ let grade (case : Fixtures.case) =
       match run_migrator input_path with
       | Error _ as error -> error
       | Ok migrated -> (
-          match check_migration case.program migrated with
+          match check_migration ~gtlc case.program migrated with
           | Error _ as error -> error
           | Ok () -> (
-              let actual = outcomes case migrated in
+              let actual = outcomes ~gtlc case migrated in
               match first_difference expected actual with
               | None -> Ok ()
               | Some (index, expected, actual) ->
@@ -141,10 +166,10 @@ let grade (case : Fixtures.case) =
                     (Printf.sprintf "context %d changed outcome from %s to %s"
                        index (show_outcome expected) (show_outcome actual)))))
 
-let grade_all cases =
+let grade_all ~gtlc cases =
   List.fold_left
     (fun passed case ->
-      match grade case with
+      match grade ~gtlc case with
       | Ok () ->
           Printf.printf "%s: PASS\n%!" case.Fixtures.name;
           passed + 1
@@ -155,21 +180,24 @@ let grade_all cases =
 
 let run () =
   try
-    verify_gtlc ();
-    if not (Sys.file_exists Paths.migrator) then begin
-      Printf.eprintf "missing executable %s\n%!" Paths.migrator;
-      write_reward 0.;
-      Error ()
-    end
-    else
-      let cases = Fixtures.load Paths.cases in
-      List.iter validate_fixture cases;
-      let passed = grade_all cases in
-      let total = List.length cases in
-      let score = if total = 0 then 0. else float passed /. float total in
-      Printf.printf "score=%d/%d (%.4f)\n%!" passed total score;
-      write_reward score;
-      Ok ()
+    let gtlc = install_trusted_gtlc () in
+    Fun.protect
+      ~finally:(fun () -> remove_file gtlc)
+      (fun () ->
+        if not (Sys.file_exists Paths.migrator) then begin
+          Printf.eprintf "missing executable %s\n%!" Paths.migrator;
+          write_reward 0.;
+          Error ()
+        end
+        else
+          let cases = Fixtures.load Paths.cases in
+          List.iter validate_fixture cases;
+          let passed = grade_all ~gtlc cases in
+          let total = List.length cases in
+          let score = if total = 0 then 0. else float passed /. float total in
+          Printf.printf "score=%d/%d (%.4f)\n%!" passed total score;
+          write_reward score;
+          Ok ())
   with Failure message | Sys_error message ->
     Printf.eprintf "VERIFIER ERROR: %s\n%!" message;
     write_reward 0.;
