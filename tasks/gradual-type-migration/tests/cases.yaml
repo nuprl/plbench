@@ -396,3 +396,15 @@
     - source: >-
         (((HOLE : any)) (fun a . fun b . a)) (fun q . q)
       expected: "<function>"
+
+# The arithmetic use of x is unreachable. Specializing x to int would move a
+# failing cast before the conditional and change the result from 1 to failure.
+- name: 22-unreachable-parameter-use
+  program: >-
+    (fun x . if true then 1 else x + 1) (true : any)
+  oracle_migration: >-
+    (fun x:any. if true then 1 else x + 1) (true : any)
+  contexts:
+    - source: >-
+        HOLE
+      expected: "1"
