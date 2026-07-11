@@ -19,6 +19,11 @@ let expected_gtlc_md5 = "99e9a9ec4075280fd24e582bd77a89a8"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 10
 
+exception Hard_reward_zero of string
+(** Raised when a migration tool emits a program that cannot stand alone as a
+    well-formed, well-typed GTLC program. One such output invalidates the whole
+    run rather than only its challenge. *)
+
 let write_file path contents =
   let channel = open_out_bin path in
   Fun.protect
@@ -149,7 +154,7 @@ let expected_outcomes (case : Fixtures.case) =
 
 (** Ask the trusted implementation for the benchmark precision metric. Only
     decorations whose complete type is [any] are counted. *)
-let count_anys ~gtlc source =
+let query_any_count ~gtlc source =
   with_source_file "gtlc-count-anys-" source (fun path ->
       match
         Command.run ~timeout_seconds:migration_timeout_seconds ~executable:gtlc
@@ -158,13 +163,25 @@ let count_anys ~gtlc source =
       | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
       | Ok { status = 0; stdout; _ } -> (
           match int_of_string_opt (String.trim stdout) with
-          | Some count when count >= 0 -> count
+          | Some count when count >= 0 -> Ok count
           | _ ->
               failwith (Printf.sprintf "trusted count-anys printed %S" stdout))
       | Ok output ->
-          failwith
-            (Printf.sprintf "trusted count-anys failed: %s"
-               (Command.diagnostic output)))
+          Error (Command.diagnostic output))
+
+let count_anys ~gtlc source =
+  match query_any_count ~gtlc source with
+  | Ok count -> count
+  | Error message -> failwith ("trusted count-anys failed: " ^ message)
+
+let require_candidate_any_count ~gtlc case_name source =
+  match query_any_count ~gtlc source with
+  | Ok count -> count
+  | Error message ->
+      raise
+        (Hard_reward_zero
+           (Printf.sprintf "%s: migration does not type-check: %s" case_name
+              message))
 
 let run_migrator input_path =
   match
@@ -246,9 +263,8 @@ let prepare_fixture ~gtlc (case : Fixtures.case) =
 (** Compute expert-relative precision credit. A candidate with fewer [any]
     decorations than the expert indicates a bad expert or insufficient contexts
     and therefore aborts verification instead of awarding unsound credit. *)
-let precision_grade ~gtlc (case : Fixtures.case) migrated =
+let precision_grade ~gtlc (case : Fixtures.case) migrated_anys =
   let oracle_anys = count_anys ~gtlc case.oracle_migration in
-  let migrated_anys = count_anys ~gtlc migrated in
   if migrated_anys < oracle_anys then
     failwith
       (Printf.sprintf
@@ -260,9 +276,10 @@ let precision_grade ~gtlc (case : Fixtures.case) migrated =
   in
   { oracle_anys; migrated_anys; score }
 
-(** Grade one challenge. Migration-tool failures, invalid migrations, static
-    failures in a candidate-filled context, and behavioral differences all
-    yield zero for this challenge. *)
+(** Grade one challenge. An emitted program that fails its standalone static
+    check raises [Hard_reward_zero]. Migration-tool failures with no output,
+    invalid migrations, contextual static failures, and behavioral differences
+    otherwise yield zero for this challenge. *)
 let grade ~gtlc (fixture : fixture) =
   let case = fixture.specification in
   with_source_file
@@ -272,12 +289,15 @@ let grade ~gtlc (fixture : fixture) =
       match run_migrator input_path with
       | Error _ as error -> error
       | Ok migrated -> (
+          let migrated_anys =
+            require_candidate_any_count ~gtlc case.name migrated
+          in
           match check_migration ~gtlc case.program migrated with
           | Error _ as error -> error
           | Ok () -> (
               let actual = outcomes ~gtlc case migrated in
               match first_difference fixture.expected actual with
-              | None -> Ok (precision_grade ~gtlc case migrated)
+              | None -> Ok (precision_grade ~gtlc case migrated_anys)
               | Some (index, expected, actual) ->
                   Error
                     (Printf.sprintf "context %d changed outcome from %s to %s"
@@ -319,8 +339,13 @@ let run () =
           Printf.printf "score=%.4f\n%!" score;
           write_reward score;
           Ok ())
-  with Failure message | Sys_error message ->
-    Printf.eprintf "VERIFIER ERROR: %s\n%!" message;
+  with
+  | Hard_reward_zero message ->
+      Printf.eprintf "HARD ZERO: %s\n%!" message;
+      write_reward 0.;
+      Error ()
+  | Failure message | Sys_error message ->
+      Printf.eprintf "VERIFIER ERROR: %s\n%!" message;
     write_reward 0.;
     Error ()
 

@@ -1,8 +1,10 @@
+type context = { source : string; expected : string } [@@deriving yaml]
+
 type benchmark = {
   name : string;
   program : string;
   oracle_migration : string;
-  contexts : string list;
+  contexts : context list;
 }
 [@@deriving yaml]
 

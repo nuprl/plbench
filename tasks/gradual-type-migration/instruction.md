@@ -56,6 +56,10 @@ The migrated program `OUTPUT.gtlc` must have the following properties:
      After migration, the dynamic check will error, but these are indistinguishable
      in the language.
 
+Every program emitted by the migration tool must parse and type-check on its
+own. If any emitted program fails this requirement, the reward for the entire
+run is zero, rather than only the reward for that input.
+
 The objective is to output the *most precise migration possible that is still
 behaviorally equivalent.* I have a hidden suite of tests where I know the most
 precise migration possible (deduced by reasoning through the program by hand).

@@ -408,3 +408,27 @@
     - source: >-
         HOLE
       expected: "1"
+
+# The boolean use of x is unreachable. Specializing x to bool would reject the
+# integer argument before the always-true branch returns 1.
+- name: 23-unreachable-boolean-use
+  program: >-
+    (fun x . if true then 1 else if x then 2 else 3) (0 : any)
+  oracle_migration: >-
+    (fun x:any. if true then 1 else if x then 2 else 3) (0 : any)
+  contexts:
+    - source: >-
+        HOLE
+      expected: "1"
+
+# The application of f is unreachable. Giving f a function type would reject
+# the boolean argument before the always-true branch returns 1.
+- name: 24-unreachable-function-use
+  program: >-
+    (fun f . if true then 1 else f 0) (false : any)
+  oracle_migration: >-
+    (fun f:any. if true then 1 else f 0) (false : any)
+  contexts:
+    - source: >-
+        HOLE
+      expected: "1"
