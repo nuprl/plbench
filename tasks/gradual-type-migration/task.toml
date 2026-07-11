@@ -18,9 +18,10 @@ timeout_sec = 900.0
 
 [agent]
 timeout_sec = 3600.0
+network_mode = "no-network"
 
 [environment]
-network_mode = "no-network"
+network_mode = "public"
 build_timeout_sec = 900.0
 os = "linux"
 cpus = 4
