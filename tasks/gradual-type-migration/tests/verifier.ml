@@ -15,7 +15,7 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "99e9a9ec4075280fd24e582bd77a89a8"
+let expected_gtlc_md5 = "918c86e81e7a219a8390fcf8ddf2a92b"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 10
 
@@ -174,14 +174,19 @@ let count_anys ~gtlc source =
   | Ok count -> count
   | Error message -> failwith ("trusted count-anys failed: " ^ message)
 
-let require_candidate_any_count ~gtlc case_name source =
-  match query_any_count ~gtlc source with
-  | Ok count -> count
-  | Error message ->
-      raise
-        (Hard_reward_zero
-           (Printf.sprintf "%s: migration does not type-check: %s" case_name
-              message))
+let require_candidate_well_typed ~gtlc case_name source =
+  with_source_file "gtlc-type-check-" source (fun path ->
+      match
+        Command.run ~timeout_seconds:migration_timeout_seconds ~executable:gtlc
+          ~arguments:[ "type-check"; path ]
+      with
+      | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
+      | Ok { status = 0; _ } -> ()
+      | Ok output ->
+          raise
+            (Hard_reward_zero
+               (Printf.sprintf "%s: migration does not type-check: %s" case_name
+                  (Command.diagnostic output))))
 
 let run_migrator input_path =
   match
@@ -289,15 +294,15 @@ let grade ~gtlc (fixture : fixture) =
       match run_migrator input_path with
       | Error _ as error -> error
       | Ok migrated -> (
-          let migrated_anys =
-            require_candidate_any_count ~gtlc case.name migrated
-          in
+          require_candidate_well_typed ~gtlc case.name migrated;
           match check_migration ~gtlc case.program migrated with
           | Error _ as error -> error
           | Ok () -> (
               let actual = outcomes ~gtlc case migrated in
               match first_difference fixture.expected actual with
-              | None -> Ok (precision_grade ~gtlc case migrated_anys)
+              | None ->
+                  let migrated_anys = count_anys ~gtlc migrated in
+                  Ok (precision_grade ~gtlc case migrated_anys)
               | Some (index, expected, actual) ->
                   Error
                     (Printf.sprintf "context %d changed outcome from %s to %s"

@@ -24,6 +24,16 @@ let exec path =
       | Semantics.Runtime_error message ->
           `Error (false, "runtime error: " ^ message))
 
+let type_check path =
+  match parse_file path with
+  | Error message -> `Error (false, "parse error: " ^ message)
+  | Ok expression -> (
+      try
+        ignore (Semantics.infer expression);
+        `Ok ()
+      with Semantics.Static_error message ->
+        `Error (false, "static error: " ^ message))
+
 
 let is_migration original_path migrated_path =
   match (parse_file original_path, parse_file migrated_path) with
@@ -63,6 +73,18 @@ let exec_command =
   in
   let file = file_argument ~position:0 ~docv:"FILE" "GTLC program to evaluate." in
   Cmd.v (Cmd.info "exec" ~doc ~man) Term.(ret (const exec $ file))
+
+let type_check_command =
+  let doc = "check that a GTLC program is well typed" in
+  let man =
+    [ `S Manpage.s_description;
+      `P
+        "Parses and type-checks FILE. Produces no output on success. A parse or \
+         static type error is reported as a command error."
+    ]
+  in
+  let file = file_argument ~position:0 ~docv:"FILE" "GTLC program to check." in
+  Cmd.v (Cmd.info "type-check" ~doc ~man) Term.(ret (const type_check $ file))
 
 
 let is_migration_command =
@@ -116,7 +138,7 @@ let command =
   in
   Cmd.group
     (Cmd.info "gtlc" ~version:"1.0" ~doc ~man)
-    [ exec_command; is_migration_command; count_anys_command ]
+    [ exec_command; type_check_command; is_migration_command; count_anys_command ]
 
 
 let () = exit (Cmd.eval command)

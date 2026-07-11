@@ -9,6 +9,9 @@ provided in `/app/gtlc`. It is compiled and ready to run at
 
 - Use `gtlc.exe exec FILE.gtlc` to type-check and evaluate a program.
 
+- Use `gtlc.exe type-check FILE.gtlc` to check that a program parses and is
+  well typed. It produces no output on success.
+
 - Use `gtlc.exe is-migration ORIGINAL.gtlc MIGRATED.gtlc` to check whether
   `MIGRATED.gtlc` is a pointwise syntactic migration of `ORIGINAL.gtlc` under
   the precision relation in `/app/Language.md`.
