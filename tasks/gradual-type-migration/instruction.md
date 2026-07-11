@@ -17,7 +17,7 @@ provided in `/app/gtlc`. It is compiled and ready to run at
   the precision relation in `/app/Language.md`.
 
 - Use `gtlc.exe count-anys FILE.gtlc` to count the number of bare `any`
-  annotations.
+  annotations. A missing lambda annotation counts as an implicit bare `any`.
 
 ## What You Must Build
 

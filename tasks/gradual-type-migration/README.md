@@ -23,12 +23,16 @@ one in several steps. If M is the candidate migration of C, we check that:
    fails, the score is zero.
 
 3. *Precision check.* We also have an expert-vetted migration E for every
-   candidate. We count the type decorations whose complete type is `any` in M
-   and E. Thus an annotation of `any` counts once, while the `any` inside an
-   annotation such as `any -> int` does not count. We score the candidate as
-   `any_count(E) / any_count(M)`. The score is one when the candidate migration
-   has exactly as many `any` decorations as E, and lower than one when it has
-   more.
+   candidate. Let B be the original program with every missing lambda
+   annotation treated as `any`. We count the type decorations whose complete
+   type is `any` in B, M, and E. Thus an annotation of `any` counts once, while
+   the `any` inside an annotation such as `any -> int` does not count. We score
+   the fraction of the available precision improvement achieved by M:
+
+   `(any_count(B) - any_count(M)) / (any_count(B) - any_count(E))`
+
+   The score is one at the expert count and zero when M leaves every original
+   annotation at bare `any`.
 
    This assumes that E has the minimal number of `any` decorations. If
    `any_count(M) < any_count(E)`, either E is not minimal or the behavioral

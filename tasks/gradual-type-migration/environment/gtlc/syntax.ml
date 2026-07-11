@@ -53,7 +53,7 @@ let count_any_annotation = function Any -> 1 | Int | Bool | Arr _ -> 0
 let rec count_anys = function
   | Lit_int _ | Lit_bool _ | Var _ -> 0
   | Fun (_, annotation, body) ->
-      Option.fold ~none:0 ~some:count_any_annotation annotation + count_anys body
+      Option.fold ~none:1 ~some:count_any_annotation annotation + count_anys body
   | App (left, right) | Bin (_, left, right) | Let (_, left, right) ->
       count_anys left + count_anys right
   | If (condition, yes, no) -> count_anys condition + count_anys yes + count_anys no
@@ -64,5 +64,5 @@ let%test "only a decoration whose whole type is any counts" =
   count_anys (Fun ("f", Some (Arr (Any, Arr (Int, Any))), Ann (Var "f", Any))) = 1
 
 
-let%test "missing annotations do not count as explicit any" =
-  count_anys (Fun ("x", None, Var "x")) = 0
+let%test "a missing annotation counts as implicit any" =
+  count_anys (Fun ("x", None, Var "x")) = 1

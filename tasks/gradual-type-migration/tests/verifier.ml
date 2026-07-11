@@ -15,7 +15,7 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "918c86e81e7a219a8390fcf8ddf2a92b"
+let expected_gtlc_md5 = "d8901eceddc819475ab777be3da48edb"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 10
 
@@ -234,7 +234,12 @@ let first_difference expected actual =
   in
   search 1 expected actual
 
-type passing_grade = { oracle_anys : int; migrated_anys : int; score : float }
+type passing_grade = {
+  baseline_anys : int;
+  oracle_anys : int;
+  migrated_anys : int;
+  score : float;
+}
 type fixture = { specification : Fixtures.case; expected : outcome list }
 
 (** Validate trusted benchmark data before invoking the submitted migrator.
@@ -269,6 +274,7 @@ let prepare_fixture ~gtlc (case : Fixtures.case) =
     decorations than the expert indicates a bad expert or insufficient contexts
     and therefore aborts verification instead of awarding unsound credit. *)
 let precision_grade ~gtlc (case : Fixtures.case) migrated_anys =
+  let baseline_anys = count_anys ~gtlc case.program in
   let oracle_anys = count_anys ~gtlc case.oracle_migration in
   if migrated_anys < oracle_anys then
     failwith
@@ -276,10 +282,18 @@ let precision_grade ~gtlc (case : Fixtures.case) migrated_anys =
          "%s: migration has %d anys, fewer than the oracle's %d; the oracle is \
           likely incorrect"
          case.name migrated_anys oracle_anys);
+  if migrated_anys > baseline_anys then
+    failwith
+      (Printf.sprintf
+         "%s: migration has %d anys, more than the original baseline's %d"
+         case.name migrated_anys baseline_anys);
   let score =
-    if migrated_anys = 0 then 1. else float oracle_anys /. float migrated_anys
+    if baseline_anys = oracle_anys then 1.
+    else
+      float (baseline_anys - migrated_anys)
+      /. float (baseline_anys - oracle_anys)
   in
-  { oracle_anys; migrated_anys; score }
+  { baseline_anys; oracle_anys; migrated_anys; score }
 
 (** Grade one challenge. An emitted program that fails its standalone static
     check raises [Hard_reward_zero]. Migration-tool failures with no output,
@@ -313,9 +327,9 @@ let grade_all ~gtlc fixtures =
     (fun total_score fixture ->
       match grade ~gtlc fixture with
       | Ok grade ->
-          Printf.printf "%s: PASS — anys=%d/%d; score=%.4f\n%!"
-            fixture.specification.name grade.oracle_anys grade.migrated_anys
-            grade.score;
+          Printf.printf "%s: PASS — anys=B%d/M%d/E%d; score=%.4f\n%!"
+            fixture.specification.name grade.baseline_anys grade.migrated_anys
+            grade.oracle_anys grade.score;
           total_score +. grade.score
       | Error message ->
           Printf.printf "%s: FAIL — %s\n%!" fixture.specification.name message;
