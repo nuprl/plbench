@@ -19,7 +19,7 @@ timeout_sec = 900.0
 [agent]
 timeout_sec = 3600.0
 network_mode = "allowlist"
-allowed_hosts = ["10.89.0.0/16", "chatgpt.com", "*.chatgpt.com"]
+allowed_hosts = ["chatgpt.com", "*.chatgpt.com"]
 
 [environment]
 network_mode = "public"
