@@ -96,30 +96,3 @@ checks. Casting from `any` checks and removes the corresponding tag. Casting
 between function types is higher order: a cast from `S1 -> S2` to `T1 -> T2`
 checks arguments from `T1` to `S1` and results from `S2` to `T2`. Casting
 through `any` checks the runtime tag and may fail.
-
-## Compatible type migration
-
-The original and migrated programs must have exactly the same expression
-structure, including every variable and binder name and the presence of every
-expression ascription. Only lambda annotation types and the types of existing
-ascriptions may differ. At each corresponding position, the original type must
-be no more precise than the migrated type. A missing lambda annotation is
-treated as `any`. Both programs must be well typed.
-
-The required safety property is the paper's stronger, context-restricted
-definition instantiated at `any`. For every well-typed closing context that
-expects the program at type `any`, the original and migrated programs must:
-
-- both terminate with equally observable base values or corresponding
-  function values;
-- both stop at failed casts; or
-- both diverge.
-
-Thus changing `fun x . x` into `fun x : int . x` is not compatible: an
-untyped caller may pass `true`, which succeeds before migration and fails
-afterward. More precise annotations inside a closed computation are useful
-when they preserve this contextual behavior.
-
-This language and safety criterion are based on the GTLC and Definitions
-3.1--3.4 of *Solver-Based Gradual Type Migration* (Phipps-Costin et al.,
-OOPSLA 2021), and the concrete syntax follows the TypeWhich parser.
