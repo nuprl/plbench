@@ -2,7 +2,7 @@
   program: >-
     (fun f . f true) (fun x . x + 100)
   oracle_migration: >-
-    (fun f:bool -> int. f true) (fun x:bool. (x : any) + 100)
+    (fun f:bool -> int. f true) (fun x:bool. x + 100)
   contexts:
     # The expression crashes in any context that needs it.
     - >-
@@ -33,7 +33,7 @@
     (fun t . fun f . f)
   oracle_migration: >-
     (fun b:(any -> any) -> (any -> int) -> any -> int.
-      b (fun c:any. (fun x:any. x x) 5 5) (fun d:any. 0))
+      b (fun c:any. (fun x:int. x x) 5 5) (fun d:any. 0))
     (fun t:any -> any. fun f:any -> int. f)
   contexts:
     # A boolean argument detects an unsafe narrowing of the returned function's domain.
@@ -53,7 +53,7 @@
   program: >-
     (fun f . (fun y . f) (f 5)) (fun x . 10 + x)
   oracle_migration: >-
-    (fun f:any -> int. (fun y:int. f) (f 5)) (fun x:any. 10 + x)
+    (fun f:int -> int. (fun y:int. f) (f 5)) (fun x:int. 10 + x)
   contexts:
     # A boundary integer probes the returned function's accepted domain and result.
     - >-
@@ -72,7 +72,7 @@
   program: >-
     fun f . fun x . x (f x)
   oracle_migration: >-
-    fun f:any. fun x:any. x (f x)
+    fun f:(any -> any) -> any. fun x:any -> any. x (f x)
   contexts:
     # The original TypeWhich witness exercises a higher-order identity flow ending in bool.
     - >-
@@ -88,7 +88,8 @@
   program: >-
     fun f . fun g . (f g) ((g 10) + 1)
   oracle_migration: >-
-    fun f:any. fun g:any. (f g) ((g 10) + 1)
+    fun f:(int -> int) -> int -> any.
+    fun g:int -> int. (f g) ((g 10) + 1)
   contexts:
     # The original witness observes a boolean result while exercising the required integer flow.
     - >-
@@ -123,7 +124,7 @@
   program: >-
     (fun x . x 5 + x) 5
   oracle_migration: >-
-    (fun x:int. (x : any) 5 + x) 5
+    (fun x:int. x 5 + x) 5
   contexts:
     # The closed failure detects any annotation that changes the unavoidable bad outflow.
     - >-
@@ -133,7 +134,7 @@
   program: >-
     (fun f . f true + (fun g . g 5) f) (fun x . 5)
   oracle_migration: >-
-    (fun f:any -> int. f true + (fun g:any -> int. g 5) f)
+    (fun f:any -> int. f true + (fun g:int -> int. g 5) f)
     (fun x:any. 5)
   contexts:
     # Direct observation detects changes to the successful closed computation.
@@ -170,7 +171,7 @@
   program: >-
     fun x . x (x + 1)
   oracle_migration: >-
-    fun x:any. x (x + 1)
+    fun x:any -> any. x (x + 1)
   contexts:
     # An integer exposes the unavoidable conflict between arithmetic and function use.
     - >-
@@ -186,7 +187,7 @@
   program: >-
     fun x . x ((x true) + 1)
   oracle_migration: >-
-    fun x:any. x (x true + 1)
+    fun x:any -> int. x (x true + 1)
   contexts:
     # A constant callback supplies the polymorphic-looking uses while producing a stable int.
     - >-
@@ -205,7 +206,7 @@
   program: >-
     fun x . x 4 + x true
   oracle_migration: >-
-    fun x:any. x 4 + x true
+    fun x:any -> int. x 4 + x true
   contexts:
     # A constant callback witnesses successful use at both argument tags.
     - >-
@@ -240,7 +241,7 @@
   program: >-
     1 + ((fun y . y) ((fun x . x) true))
   oracle_migration: >-
-    1 + (fun y:bool. (y : any)) ((fun x:bool. x) true)
+    1 + (fun y:bool. y) ((fun x:bool. x) true)
   contexts:
     # The unavoidable closed cast failure detects migrations that mask the bad flow.
     - >-
@@ -269,7 +270,7 @@
   program: >-
     fun x . fun y . y x x
   oracle_migration: >-
-    fun x:any. fun y:any. y x x
+    fun x:any. fun y:any -> any -> any. y x x
   contexts:
     # Integer duplication tests both argument positions and an integer-producing consumer.
     - >-
@@ -285,7 +286,7 @@
   program: >-
     fun x . (fun y . x) x x
   oracle_migration: >-
-    fun x:any. (fun y:any. x) x x
+    fun x:any -> any. (fun y:any -> any. x) x x
   contexts:
     # Identity supplies the self-compatible higher-order path and exposes its result.
     - >-
@@ -322,7 +323,7 @@
   program: >-
     fun x . x x
   oracle_migration: >-
-    fun x:any. x x
+    fun x:any -> any. x x
   contexts:
     # Identity is a self-compatible function and exposes an integer result afterward.
     - >-
@@ -341,8 +342,11 @@
   program: >-
     (fun x . fun y . y (x (fun x . x)) (x (fun b . fun c . b)))
     (fun d . d d)
+  # Upstream's manual assertion diverges in the first context below. This is the
+  # most precise upstream TypeWhich result that passes all documented contexts.
   oracle_migration: >-
-    (fun x:(any -> any) -> any. fun y:any.
+    (fun x:(any -> any) -> any.
+      fun y:any -> any -> any.
       y (x (fun x:any. x)) (x (fun b:any. fun c:any. b)))
     (fun d:any -> any. d d)
   contexts:
@@ -366,12 +370,19 @@
       (fun m . fun n . (e m) (e n))
       (fun m . fun v . e (m v)))
   oracle_migration: >-
-    (fun h:any -> any -> any.
-      (fun x:any -> any. h (x x)) (fun x:any. h x x))
-    (fun e:any. fun m:any.
-      m (fun x:any. x)
-        (fun m:any. fun n:any. e m (e n))
-        (fun m:any. fun v:any. e (m v)))
+    (fun h:((any -> any) -> (any -> any -> any) ->
+            ((any -> any) -> any -> any) -> any) ->
+           ((any -> any) -> (any -> any -> any) ->
+            ((any -> any) -> any -> any) -> any) -> any.
+      (fun x:any -> any. h (x x))
+      (fun x:(any -> any) -> (any -> any -> any) ->
+             ((any -> any) -> any -> any) -> any. h x x))
+    (fun e:any.
+      fun m:(any -> any) -> (any -> any -> any) ->
+            ((any -> any) -> any -> any) -> any.
+        m (fun x:any. x)
+          (fun m:any. fun n:any. e m (e n))
+          (fun m:any -> any. fun v:any. e (m v)))
   contexts:
     # A variable-form encoding checks the interpreter's base dispatch without deeper recursion.
     - >-

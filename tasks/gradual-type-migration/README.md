@@ -10,5 +10,5 @@ reference executable, uses its syntactic migration check, and compares the
 original and migrated programs in documented closing contexts. Passing
 migrations receive an oracle-relative precision score based on their explicit
 `any` counts. One typed YAML document contains the 22 TypeWhich adversarial and
-Migeed--Palsberg challenge programs, the TypeWhich oracle outputs, and the
-contexts.
+Migeed--Palsberg challenge programs, oracle migrations drawn from TypeWhich's
+manual compatibility assertions and best compatible results, and the contexts.

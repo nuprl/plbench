@@ -14,8 +14,8 @@ source code, is compiled and ready to run at `/app/gtlc/_build/default/gtlc.exe`
   `ORIGINAL.gtlc`. This is a syntactic check only. Making types
   more precise can change the behavior of a program as described below.
 
-- Use `gtlc.exe count-anys FILE.gtlc` to count explicit occurrences of `any`
-  in the program's type annotations.
+- Use `gtlc.exe count-anys FILE.gtlc` to count annotations and ascriptions whose
+  complete type is `any`, using the TypeWhich benchmark metric.
 
 The environment has Python, OCaml, Rust, and Z3 installed. You can write
 code in any programming language available in the environment.

@@ -93,9 +93,9 @@ let count_anys_command =
   let man =
     [ `S Manpage.s_description;
       `P
-        "Type-checks FILE, then prints the number of explicit any occurrences in its \
-         lambda annotations and expression ascriptions. Occurrences nested inside \
-         function types are counted individually."
+        "Type-checks FILE, then prints the number of lambda annotations and expression \
+         ascriptions whose complete type is any. This is the precision metric used by \
+         the TypeWhich benchmark suite."
     ]
   in
   let file = file_argument ~position:0 ~docv:"FILE" "GTLC program to inspect." in

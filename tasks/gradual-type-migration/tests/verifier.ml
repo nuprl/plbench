@@ -5,7 +5,7 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "7e1919b868cbe6e0aea6093628c5a81c"
+let expected_gtlc_md5 = "eeaca52811ad981325cf0e7114b29282"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 2
 
