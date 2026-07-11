@@ -33,6 +33,17 @@ let is_migration original_path migrated_path =
       with Semantics.Static_error message -> `Error (false, message))
 
 
+let count_anys path =
+  match parse_file path with
+  | Error message -> `Error (false, message)
+  | Ok expression -> (
+      try
+        ignore (Semantics.infer expression);
+        Printf.printf "%d\n%!" (Syntax.count_anys expression);
+        `Ok ()
+      with Semantics.Static_error message -> `Error (false, message))
+
+
 let file_argument ~position ~docv doc =
   Arg.(required & pos position (some file) None & info [] ~docv ~doc)
 
@@ -77,6 +88,20 @@ let is_migration_command =
     Term.(ret (const is_migration $ original $ migrated))
 
 
+let count_anys_command =
+  let doc = "count explicit any occurrences in a GTLC program" in
+  let man =
+    [ `S Manpage.s_description;
+      `P
+        "Type-checks FILE, then prints the number of explicit any occurrences in its \
+         lambda annotations and expression ascriptions. Occurrences nested inside \
+         function types are counted individually."
+    ]
+  in
+  let file = file_argument ~position:0 ~docv:"FILE" "GTLC program to inspect." in
+  Cmd.v (Cmd.info "count-anys" ~doc ~man) Term.(ret (const count_anys $ file))
+
+
 let command =
   let doc = "reference tools for the gradual lambda calculus" in
   let man =
@@ -88,7 +113,7 @@ let command =
   in
   Cmd.group
     (Cmd.info "gtlc" ~version:"1.0" ~doc ~man)
-    [ exec_command; is_migration_command ]
+    [ exec_command; is_migration_command; count_anys_command ]
 
 
 let () = exit (Cmd.eval command)

@@ -23,3 +23,7 @@ val show_typ : typ -> string
 
 val show_expr : expr -> string
 (** Render an expression in an unambiguous canonical form. *)
+
+val count_anys : expr -> int
+(** Count explicit occurrences of [any] in lambda annotations and expression
+    ascriptions, including occurrences nested inside function types. *)

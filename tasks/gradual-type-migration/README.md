@@ -7,6 +7,8 @@ evaluation and syntactic migration relations.
 
 The private verifier is a small OCaml/Dune project. It authenticates the
 reference executable, uses its syntactic migration check, and compares the
-original and migrated programs in documented closing contexts. One typed YAML
-document contains the 22 TypeWhich adversarial and Migeed--Palsberg challenge
-programs, the TypeWhich oracle outputs, and the contexts.
+original and migrated programs in documented closing contexts. Passing
+migrations receive an oracle-relative precision score based on their explicit
+`any` counts. One typed YAML document contains the 22 TypeWhich adversarial and
+Migeed--Palsberg challenge programs, the TypeWhich oracle outputs, and the
+contexts.

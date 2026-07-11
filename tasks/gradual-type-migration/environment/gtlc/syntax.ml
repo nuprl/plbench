@@ -46,3 +46,29 @@ let rec show_expr = function
       Printf.sprintf "(let %s = %s in %s)" name (show_expr value) (show_expr body)
   | Ann (expression, typ) ->
       Printf.sprintf "(%s : %s)" (show_expr expression) (show_typ typ)
+
+
+let rec count_anys_in_type = function
+  | Any -> 1
+  | Int | Bool -> 0
+  | Arr (domain, codomain) -> count_anys_in_type domain + count_anys_in_type codomain
+
+
+let rec count_anys = function
+  | Lit_int _ | Lit_bool _ | Var _ -> 0
+  | Fun (_, annotation, body) ->
+      Option.fold ~none:0 ~some:count_anys_in_type annotation + count_anys body
+  | App (left, right) | Bin (_, left, right) | Let (_, left, right) ->
+      count_anys left + count_anys right
+  | If (condition, yes, no) -> count_anys condition + count_anys yes + count_anys no
+  | Ann (expression, typ) -> count_anys expression + count_anys_in_type typ
+
+
+let%test "count anys in nested annotation types and ascriptions" =
+  count_anys
+    (Fun ("f", Some (Arr (Any, Arr (Int, Any))), Ann (Var "f", Arr (Any, Bool))))
+  = 3
+
+
+let%test "missing annotations do not count as explicit any" =
+  count_anys (Fun ("x", None, Var "x")) = 0

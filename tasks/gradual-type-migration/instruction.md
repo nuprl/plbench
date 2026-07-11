@@ -12,7 +12,10 @@ source code, is compiled and ready to run at `/app/gtlc/_build/default/gtlc.exe`
 - Use `gtlc.exe is-migration ORIGINAL.gtlc MIGRATED.gtlc` to check if
   `MIGRATED.gtlc` has syntactically more precise type annotations than
   `ORIGINAL.gtlc`. This is a syntactic check only. Making types
-   more precise can change the behavior of a program as described below.
+  more precise can change the behavior of a program as described below.
+
+- Use `gtlc.exe count-anys FILE.gtlc` to count explicit occurrences of `any`
+  in the program's type annotations.
 
 The environment has Python, OCaml, Rust, and Z3 installed. You can write
 code in any programming language available in the environment.

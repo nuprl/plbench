@@ -5,7 +5,7 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "2bf7777d8475a3cef39e5ddf93ce9198"
+let expected_gtlc_md5 = "7e1919b868cbe6e0aea6093628c5a81c"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 2
 
@@ -102,6 +102,23 @@ let outcomes ~gtlc case expression =
     (fun context -> execute ~gtlc (fill_context context expression))
     case.Fixtures.contexts
 
+let count_anys ~gtlc source =
+  with_source_file "gtlc-count-anys-" source (fun path ->
+      match
+        Command.run ~timeout_seconds:migration_timeout_seconds ~executable:gtlc
+          ~arguments:[ "count-anys"; path ]
+      with
+      | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
+      | Ok { status = 0; stdout; _ } -> (
+          match int_of_string_opt (String.trim stdout) with
+          | Some count when count >= 0 -> count
+          | _ ->
+              failwith (Printf.sprintf "trusted count-anys printed %S" stdout))
+      | Ok output ->
+          failwith
+            (Printf.sprintf "trusted count-anys failed: %s"
+               (Command.diagnostic output)))
+
 let run_migrator input_path =
   match
     Command.run ~timeout_seconds:migration_timeout_seconds
@@ -146,6 +163,22 @@ let first_difference expected actual =
   in
   search 1 expected actual
 
+type passing_grade = { oracle_anys : int; migrated_anys : int; score : float }
+
+let precision_grade ~gtlc (case : Fixtures.case) migrated =
+  let oracle_anys = count_anys ~gtlc case.oracle_migration in
+  let migrated_anys = count_anys ~gtlc migrated in
+  if migrated_anys < oracle_anys then
+    failwith
+      (Printf.sprintf
+         "%s: migration has %d anys, fewer than the oracle's %d; the oracle is \
+          likely incorrect"
+         case.name migrated_anys oracle_anys);
+  let score =
+    if migrated_anys = 0 then 1. else float oracle_anys /. float migrated_anys
+  in
+  { oracle_anys; migrated_anys; score }
+
 let grade ~gtlc (case : Fixtures.case) =
   let expected = outcomes ~gtlc case case.program in
   with_source_file
@@ -160,7 +193,7 @@ let grade ~gtlc (case : Fixtures.case) =
           | Ok () -> (
               let actual = outcomes ~gtlc case migrated in
               match first_difference expected actual with
-              | None -> Ok ()
+              | None -> Ok (precision_grade ~gtlc case migrated)
               | Some (index, expected, actual) ->
                   Error
                     (Printf.sprintf "context %d changed outcome from %s to %s"
@@ -168,15 +201,16 @@ let grade ~gtlc (case : Fixtures.case) =
 
 let grade_all ~gtlc cases =
   List.fold_left
-    (fun passed case ->
+    (fun total_score case ->
       match grade ~gtlc case with
-      | Ok () ->
-          Printf.printf "%s: PASS\n%!" case.Fixtures.name;
-          passed + 1
+      | Ok grade ->
+          Printf.printf "%s: PASS — anys=%d/%d; score=%.4f\n%!"
+            case.Fixtures.name grade.oracle_anys grade.migrated_anys grade.score;
+          total_score +. grade.score
       | Error message ->
           Printf.printf "%s: FAIL — %s\n%!" case.Fixtures.name message;
-          passed)
-    0 cases
+          total_score)
+    0. cases
 
 let run () =
   try
@@ -192,10 +226,10 @@ let run () =
         else
           let cases = Fixtures.load Paths.cases in
           List.iter validate_fixture cases;
-          let passed = grade_all ~gtlc cases in
+          let total_score = grade_all ~gtlc cases in
           let total = List.length cases in
-          let score = if total = 0 then 0. else float passed /. float total in
-          Printf.printf "score=%d/%d (%.4f)\n%!" passed total score;
+          let score = if total = 0 then 0. else total_score /. float total in
+          Printf.printf "score=%.4f\n%!" score;
           write_reward score;
           Ok ())
   with Failure message | Sys_error message ->
