@@ -101,9 +101,12 @@ incompatible tag check when evaluated.
 
 ## Compatible type migration
 
-Erasing a migration removes every lambda annotation and every expression
-ascription. A migration must erase to an alpha-equivalent copy of its input
-and must only replace omitted `any` annotations with more precise types.
+Type decorations are lambda annotations and expression ascriptions. Ignoring
+type decorations, the original and migrated programs must have exactly the
+same syntax, including every variable and binder name. At each corresponding
+position, the original decoration type must be no more precise than the
+migrated decoration type. A missing decoration is treated as `any`. Both
+programs must be well typed.
 
 The required safety property is the paper's stronger, context-restricted
 definition instantiated at `any`. For every well-typed closing context that

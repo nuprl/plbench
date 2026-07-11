@@ -1,0 +1,6 @@
+profile = conventional
+break-separators = after
+dock-collection-brackets = false
+let-binding-spacing = sparse
+margin = 88
+wrap-comments = true

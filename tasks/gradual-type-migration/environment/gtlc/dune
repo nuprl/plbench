@@ -1,0 +1,17 @@
+(ocamllex lexer)
+
+(menhir
+ (modules gtlc_parser))
+
+(library
+ (name gtlc_reference)
+ (wrapped false)
+ (modules syntax gtlc_parser lexer parser semantics migration)
+ (inline_tests)
+ (preprocess
+  (pps ppx_inline_test)))
+
+(executable
+ (name gtlc)
+ (modules gtlc)
+ (libraries cmdliner gtlc_reference))

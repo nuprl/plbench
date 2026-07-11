@@ -4,25 +4,68 @@ let parse ~description source =
   try Ok (Parser.parse source)
   with Parser.Error message -> Error (description ^ ": " ^ message)
 
-let validate ~original ~migrated =
-  if not (Semantics.structurally_equal original migrated) then
-    Error "output changes program structure after annotations are erased"
-  else if not (Semantics.all_lambdas_annotated migrated) then
-    Error "not every lambda parameter is annotated"
-  else
-    try
-      let original_type = Semantics.infer original in
-      let migrated_type = Semantics.infer migrated in
-      if Semantics.type_leq original_type migrated_type then Ok migrated_type
-      else
-        Error
-          (Printf.sprintf "result type %s is not at least as precise as %s"
-             (show_typ migrated_type) (show_typ original_type))
-    with Semantics.Static_error message -> Error ("static error: " ^ message)
-
 let rec peel_ascriptions types = function
   | Ann (expression, typ) -> peel_ascriptions (typ :: types) expression
   | expression -> (List.rev types, expression)
+
+let annotation_type = Option.value ~default:Any
+
+let rec pointwise_types_leq left right =
+  match (left, right) with
+  | [], [] -> true
+  | left_type :: left, right_type :: right ->
+      Semantics.type_leq left_type right_type && pointwise_types_leq left right
+  | [], right_type :: right ->
+      Semantics.type_leq Any right_type && pointwise_types_leq [] right
+  | left_type :: left, [] ->
+      Semantics.type_leq left_type Any && pointwise_types_leq left []
+
+let rec syntax_leq left right =
+  let left_types, left = peel_ascriptions [] left in
+  let right_types, right = peel_ascriptions [] right in
+  pointwise_types_leq left_types right_types
+  &&
+  match (left, right) with
+  | Lit_int left, Lit_int right -> left = right
+  | Lit_bool left, Lit_bool right -> left = right
+  | Var left, Var right -> String.equal left right
+  | ( Fun (left_name, left_type, left_body),
+      Fun (right_name, right_type, right_body) ) ->
+      String.equal left_name right_name
+      && Semantics.type_leq
+           (annotation_type left_type)
+           (annotation_type right_type)
+      && syntax_leq left_body right_body
+  | App (left_function, left_argument), App (right_function, right_argument) ->
+      syntax_leq left_function right_function
+      && syntax_leq left_argument right_argument
+  | ( Bin (left_operator, left_left, left_right),
+      Bin (right_operator, right_left, right_right) ) ->
+      left_operator = right_operator
+      && syntax_leq left_left right_left
+      && syntax_leq left_right right_right
+  | ( If (left_condition, left_yes, left_no),
+      If (right_condition, right_yes, right_no) ) ->
+      syntax_leq left_condition right_condition
+      && syntax_leq left_yes right_yes
+      && syntax_leq left_no right_no
+  | ( Let (left_name, left_value, left_body),
+      Let (right_name, right_value, right_body) ) ->
+      String.equal left_name right_name
+      && syntax_leq left_value right_value
+      && syntax_leq left_body right_body
+  | _ -> false
+
+let validate ~original ~migrated =
+  try
+    ignore (Semantics.infer original);
+    let migrated_type = Semantics.infer migrated in
+    if not (syntax_leq original migrated) then
+      Error "output is not a pointwise syntactic migration of the input"
+    else if not (Semantics.all_lambdas_annotated migrated) then
+      Error "not every lambda parameter is annotated"
+    else Ok migrated_type
+  with Semantics.Static_error message -> Error ("static error: " ^ message)
 
 let types_below candidates maxima =
   List.length candidates <= List.length maxima

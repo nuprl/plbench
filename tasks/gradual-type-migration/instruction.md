@@ -1,32 +1,47 @@
-Implement a gradual type-migration tool for the language documented in
-`/app/Language.md`.
+Your task is to implement type migration for a gradually typed lambda
+calculus.
 
-Your submission must install an executable at `/app/migrate` with this
+## What Is Provided
+
+The language, including its syntax, type system, and precision relation, is
+documented in `/app/Language.md`.
+
+A reference implementation is compiled and ready to run at
+`/app/gtlc/_build/default/gtlc.exe`. It provides two subcommands:
+
+```bash
+/app/gtlc/_build/default/gtlc.exe exec FILE.gtlc
+/app/gtlc/_build/default/gtlc.exe is-migration ORIGINAL.gtlc MIGRATED.gtlc
+```
+
+Run the executable or either subcommand with `--help` for its complete
+interface. Both commands type-check their input programs before doing
+anything else and raise an error if a program is not well typed. `exec`
+evaluates a closed program without a fuel limit. `is-migration` checks the
+pointwise syntactic precision relation and prints a Boolean.
+
+The environment has Python, OCaml, Rust, and Z3 installed. You can write
+code in any programming language available in the environment.
+
+## What You Must Build
+
+Write an executable type-migration tool with exactly this command-line
 interface:
 
-```text
+```bash
 /app/migrate FILE.gtlc
 ```
 
 `FILE.gtlc` is a closed, well-scoped program whose lambda parameters have no
 type annotations. On success, print exactly one migrated program to standard
-output and exit with status 0. Diagnostic text may be printed to standard
-error.
+output and exit with status 0. You may print diagnostics to standard error.
 
-Z3 4.8.12 is installed in the environment and available as `z3`.
+The migrated program must parse according to `/app/Language.md`, be well
+typed, annotate every lambda parameter, and make `is-migration` print `true`
+when given the input and migrated program.
 
-The migrated program must:
-
-1. parse in the language from `/app/Language.md`;
-2. annotate every lambda parameter;
-3. be alpha-equivalent to the input after all parameter annotations and
-   expression ascriptions are erased;
-4. be well typed and have a result type at least as precise as the input's;
-5. be a compatible migration in the strict sense described in
-   `/app/Language.md`: it must preserve values, coercion failures, and
-   divergence in every well-typed context that receives the program at type
-   `any`; and
-6. subject to compatibility, make the annotations as precise as possible.
-
-Compatibility takes priority over precision: produce a maximally precise
-compatible migration, or any maximal one if several are incomparable.
+The migration must be compatible in the sense defined by `/app/Language.md`:
+in every well-typed context that receives the program at type `any`, it must
+preserve values, coercion failures, and divergence. Subject to compatibility,
+make the annotations as precise as possible. If several maximally precise
+compatible migrations are incomparable, you may produce any one of them.

@@ -6,8 +6,9 @@ val parse : description:string -> string -> (Syntax.expr, string) result
 
 val validate :
   original:Syntax.expr -> migrated:Syntax.expr -> (Syntax.typ, string) result
-(** Check that [migrated] only adds annotations, annotates every lambda, and has
-    a result type at least as precise as [original]. *)
+(** Type-check both programs, then check that their non-type syntax (including
+    names) is identical, their annotations are pointwise ordered, and every
+    lambda in [migrated] is explicitly annotated. *)
 
 val precision_below :
   candidate:Syntax.expr -> maximum:Syntax.expr -> (int * int) option

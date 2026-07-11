@@ -22,7 +22,14 @@ RUN apt-get update \
     && opam init --bare --disable-sandboxing -y \
     && opam switch create system ocaml-system -y \
     && eval "$(opam env --switch=system)" \
-    && opam install -y dune menhir ocamlformat ppx_deriving_yaml yaml
+    && opam install -y \
+        cmdliner \
+        dune \
+        menhir \
+        ocamlformat \
+        ppx_deriving_yaml \
+        ppx_inline_test \
+        yaml
 
 RUN curl -fsSL -o /tmp/z3.zip \
       "https://github.com/Z3Prover/z3/releases/download/z3-${Z3_VERSION}/${Z3_ASSET}.zip" \
@@ -36,3 +43,8 @@ RUN curl -fsSL -o /tmp/z3.zip \
 
 WORKDIR /app
 COPY Language.md /app/Language.md
+COPY gtlc /app/gtlc
+
+RUN eval "$(opam env --switch=system)" \
+    && dune runtest --root /app/gtlc \
+    && dune build --root /app/gtlc gtlc.exe
