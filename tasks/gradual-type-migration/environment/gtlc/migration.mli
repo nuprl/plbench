@@ -8,3 +8,9 @@ val check : original:Syntax.expr -> migrated:Syntax.expr -> bool
     only when the original type is no more precise than the migrated type. A
     missing lambda annotation denotes [any]. A static error is raised if either
     program does not type-check. *)
+
+val distance :
+  less_precise:Syntax.expr -> more_precise:Syntax.expr -> int option
+(** Count single-edge precision refinements between structurally corresponding
+    programs. Returns [None] when the syntax differs or corresponding types are
+    incomparable. Both programs are type-checked first. *)

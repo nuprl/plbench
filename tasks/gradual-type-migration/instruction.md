@@ -16,6 +16,9 @@ provided in `/app/gtlc`. It is compiled and ready to run at
   `MIGRATED.gtlc` is a pointwise syntactic migration of `ORIGINAL.gtlc` under
   the precision relation in `/app/Language.md`.
 
+- Use `gtlc.exe precision-distance LESS.gtlc MORE.gtlc` to count the
+  single-step type refinements between two pointwise-comparable programs.
+
 - Use `gtlc.exe count-anys FILE.gtlc` to count the number of bare `any`
   annotations. A missing lambda annotation counts as an implicit bare `any`.
 

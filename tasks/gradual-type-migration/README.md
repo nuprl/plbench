@@ -23,21 +23,27 @@ one in several steps. If M is the candidate migration of C, we check that:
    fails, the score is zero.
 
 3. *Precision check.* We also have an expert-vetted migration E for every
-   candidate. Let B be the original program with every missing lambda
-   annotation treated as `any`. We count the type decorations whose complete
-   type is `any` in B, M, and E. Thus an annotation of `any` counts once, while
-   the `any` inside an annotation such as `any -> int` does not count. We score
-   the fraction of the available precision improvement achieved by M:
+   candidate. A single precision step replaces `any` with `int`, `bool`, or
+   `any -> any`, or performs one such refinement inside a function type. For
+   example:
 
-   `(any_count(B) - any_count(M)) / (any_count(B) - any_count(E))`
+   ```text
+   any
+   => any -> any
+   => int -> any
+   => int -> int
+   ```
 
-   The score is one at the expert count and zero when M leaves every original
-   annotation at bare `any`.
+   Let `distance(X, Y)` count these pointwise steps from X to the more-precise
+   Y. The candidate receives the fraction of the available expert precision
+   that it achieves:
 
-   This assumes that E has the minimal number of `any` decorations. If
-   `any_count(M) < any_count(E)`, either E is not minimal or the behavioral
-   checks are not strong enough. We abort with a verifier error and refuse to
-   grade the solution.
+   `distance(C, M) / distance(C, E)`
+
+   Before scoring, M must be no more precise than E at every corresponding
+   type. If M is more precise than E or incomparable with it, we abort with a
+   verifier error: either E is not maximal or the behavioral tests are not
+   strong enough.
 
 As a sanity check, we run (1) and (2) on the expert-vetted migrations
 before checking any candidate and abort with a verifier error if they fail.

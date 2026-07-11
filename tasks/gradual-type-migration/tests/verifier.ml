@@ -5,8 +5,8 @@
     verifier authenticates the reference GTLC executable and validates every
     fixture against both the original and expert programs. A candidate earns
     credit only when it is a syntactic migration and matches the original in
-    every context. Its score is then determined by its number of [any]
-    decorations relative to the expert migration. *)
+    every context. Its score is the fraction of the expert migration's
+    single-edge precision refinements that it realizes. *)
 
 module Paths = struct
   let migrator = "/app/migrate"
@@ -15,7 +15,7 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "d8901eceddc819475ab777be3da48edb"
+let expected_gtlc_md5 = "0468736b2b877fe4af91ee990fe1268c"
 let migration_timeout_seconds = 15
 let execution_timeout_seconds = 10
 
@@ -152,28 +152,6 @@ let expected_outcomes (case : Fixtures.case) =
     (fun context -> parse_expected_outcome context.Fixtures.expected)
     case.contexts
 
-(** Ask the trusted implementation for the benchmark precision metric. Only
-    decorations whose complete type is [any] are counted. *)
-let query_any_count ~gtlc source =
-  with_source_file "gtlc-count-anys-" source (fun path ->
-      match
-        Command.run ~timeout_seconds:migration_timeout_seconds ~executable:gtlc
-          ~arguments:[ "count-anys"; path ]
-      with
-      | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
-      | Ok { status = 0; stdout; _ } -> (
-          match int_of_string_opt (String.trim stdout) with
-          | Some count when count >= 0 -> Ok count
-          | _ ->
-              failwith (Printf.sprintf "trusted count-anys printed %S" stdout))
-      | Ok output ->
-          Error (Command.diagnostic output))
-
-let count_anys ~gtlc source =
-  match query_any_count ~gtlc source with
-  | Ok count -> count
-  | Error message -> failwith ("trusted count-anys failed: " ^ message)
-
 let require_candidate_well_typed ~gtlc case_name source =
   with_source_file "gtlc-type-check-" source (fun path ->
       match
@@ -234,12 +212,7 @@ let first_difference expected actual =
   in
   search 1 expected actual
 
-type passing_grade = {
-  baseline_anys : int;
-  oracle_anys : int;
-  migrated_anys : int;
-  score : float;
-}
+type passing_grade = { expert_steps : int; migrated_steps : int; score : float }
 type fixture = { specification : Fixtures.case; expected : outcome list }
 
 (** Validate trusted benchmark data before invoking the submitted migrator.
@@ -270,30 +243,40 @@ let prepare_fixture ~gtlc (case : Fixtures.case) =
            case.name (show_outcome actual) index (show_outcome expected)));
   { specification = case; expected = original }
 
-(** Compute expert-relative precision credit. A candidate with fewer [any]
-    decorations than the expert indicates a bad expert or insufficient contexts
-    and therefore aborts verification instead of awarding unsound credit. *)
-let precision_grade ~gtlc (case : Fixtures.case) migrated_anys =
-  let baseline_anys = count_anys ~gtlc case.program in
-  let oracle_anys = count_anys ~gtlc case.oracle_migration in
-  if migrated_anys < oracle_anys then
-    failwith
-      (Printf.sprintf
-         "%s: migration has %d anys, fewer than the oracle's %d; the oracle is \
-          likely incorrect"
-         case.name migrated_anys oracle_anys);
-  if migrated_anys > baseline_anys then
-    failwith
-      (Printf.sprintf
-         "%s: migration has %d anys, more than the original baseline's %d"
-         case.name migrated_anys baseline_anys);
-  let score =
-    if baseline_anys = oracle_anys then 1.
-    else
-      float (baseline_anys - migrated_anys)
-      /. float (baseline_anys - oracle_anys)
+let precision_distance ~gtlc less_precise more_precise =
+  with_source_file "gtlc-less-precise-" less_precise (fun less_path ->
+      with_source_file "gtlc-more-precise-" more_precise (fun more_path ->
+          match
+            Command.run ~timeout_seconds:migration_timeout_seconds
+              ~executable:gtlc
+              ~arguments:[ "precision-distance"; less_path; more_path ]
+          with
+          | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
+          | Ok { status = 0; stdout; _ } -> (
+              match int_of_string_opt (String.trim stdout) with
+              | Some distance when distance >= 0 -> distance
+              | _ ->
+                  failwith
+                    (Printf.sprintf "trusted precision-distance printed %S"
+                       stdout))
+          | Ok output ->
+              failwith
+                ("trusted precision-distance failed: "
+                ^ Command.diagnostic output)))
+
+(** Compute the fraction of the expert's pointwise precision refinements that
+    the candidate realizes. The caller has already established that the
+    candidate is no more precise than the expert. *)
+let precision_grade ~gtlc (case : Fixtures.case) migrated =
+  let expert_steps =
+    precision_distance ~gtlc case.program case.oracle_migration
   in
-  { baseline_anys; oracle_anys; migrated_anys; score }
+  let migrated_steps = precision_distance ~gtlc case.program migrated in
+  let score =
+    if expert_steps = 0 then 1.
+    else float migrated_steps /. float expert_steps
+  in
+  { expert_steps; migrated_steps; score }
 
 (** Grade one challenge. An emitted program that fails its standalone static
     check raises [Hard_reward_zero]. Migration-tool failures with no output,
@@ -314,9 +297,15 @@ let grade ~gtlc (fixture : fixture) =
           | Ok () -> (
               let actual = outcomes ~gtlc case migrated in
               match first_difference fixture.expected actual with
-              | None ->
-                  let migrated_anys = count_anys ~gtlc migrated in
-                  Ok (precision_grade ~gtlc case migrated_anys)
+              | None -> (
+                  match check_migration ~gtlc migrated case.oracle_migration with
+                  | Ok () -> Ok (precision_grade ~gtlc case migrated)
+                  | Error message ->
+                      failwith
+                        (Printf.sprintf
+                           "%s: behaviorally valid migration is more precise \
+                            than or incomparable with the expert: %s"
+                           case.name message))
               | Some (index, expected, actual) ->
                   Error
                     (Printf.sprintf "context %d changed outcome from %s to %s"
@@ -327,9 +316,9 @@ let grade_all ~gtlc fixtures =
     (fun total_score fixture ->
       match grade ~gtlc fixture with
       | Ok grade ->
-          Printf.printf "%s: PASS — anys=B%d/M%d/E%d; score=%.4f\n%!"
-            fixture.specification.name grade.baseline_anys grade.migrated_anys
-            grade.oracle_anys grade.score;
+          Printf.printf "%s: PASS — precision=%d/%d; score=%.4f\n%!"
+            fixture.specification.name grade.migrated_steps grade.expert_steps
+            grade.score;
           total_score +. grade.score
       | Error message ->
           Printf.printf "%s: FAIL — %s\n%!" fixture.specification.name message;

@@ -44,6 +44,18 @@ let is_migration original_path migrated_path =
         `Ok ()
       with Semantics.Static_error message -> `Error (false, message))
 
+let precision_distance less_path more_path =
+  match (parse_file less_path, parse_file more_path) with
+  | Error message, _ | _, Error message -> `Error (false, message)
+  | Ok less_precise, Ok more_precise -> (
+      try
+        match Migration.distance ~less_precise ~more_precise with
+        | Some distance ->
+            Printf.printf "%d\n%!" distance;
+            `Ok ()
+        | None -> `Error (false, "programs are not pointwise comparable")
+      with Semantics.Static_error message -> `Error (false, message))
+
 
 let count_anys path =
   match parse_file path with
@@ -112,6 +124,26 @@ let is_migration_command =
     (Cmd.info "is-migration" ~doc ~man)
     Term.(ret (const is_migration $ original $ migrated))
 
+let precision_distance_command =
+  let doc = "count pointwise precision-refinement steps" in
+  let man =
+    [ `S Manpage.s_description;
+      `P
+        "First type-checks both programs, then prints the number of single-edge \
+         precision refinements from LESS to MORE. The command fails when the \
+         programs differ structurally or corresponding types are incomparable."
+    ]
+  in
+  let less =
+    file_argument ~position:0 ~docv:"LESS" "Less-precise GTLC program."
+  in
+  let more =
+    file_argument ~position:1 ~docv:"MORE" "More-precise GTLC program."
+  in
+  Cmd.v
+    (Cmd.info "precision-distance" ~doc ~man)
+    Term.(ret (const precision_distance $ less $ more))
+
 
 let count_anys_command =
   let doc = "count explicit any occurrences in a GTLC program" in
@@ -138,7 +170,12 @@ let command =
   in
   Cmd.group
     (Cmd.info "gtlc" ~version:"1.0" ~doc ~man)
-    [ exec_command; type_check_command; is_migration_command; count_anys_command ]
+    [ exec_command;
+      type_check_command;
+      is_migration_command;
+      precision_distance_command;
+      count_anys_command
+    ]
 
 
 let () = exit (Cmd.eval command)
