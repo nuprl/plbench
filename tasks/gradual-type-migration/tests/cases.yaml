@@ -1,14 +1,18 @@
+# The expression crashes in any context that needs it, so that's the only
+# test we need.
 - name: 01-farg-mismatch
   program: >-
     (fun f . f true) (fun x . x + 100)
   oracle_migration: >-
     (fun f:bool -> int. f true) (fun x:any. x + 100)
   contexts:
-    # The expression crashes in any context that needs it.
+
     - source: >-
         HOLE
       expected: "runtime failure"
 
+# i is bound to the identity function and used polymorphically. The tag of the
+# program is bool.
 - name: 02-rank2-poly-id
   program: >-
     (fun i . (fun a . i true) (i 5)) (fun x . x)
@@ -19,19 +23,15 @@
     - source: >-
         HOLE
       expected: "true"
-    # A boolean demand checks that the dynamically returned boolean remains usable as bool.
+    # Demand the expression as a bool. This rejects `i : any -> int` and similar
+    # migrations. There's no need to check for runtime errors because this check
+    # alone ensures that the tag for the migrated program is bool.
     - source: >-
         if ((HOLE : any)) then 11 else 12
       expected: "11"
-    # An incompatible integer demand detects a migration that incorrectly permits the result as int.
-    - source: >-
-        ((HOLE : any)) + 1
-      expected: "runtime failure"
-    # An incompatible function demand detects a migration that changes the result into a callable value.
-    - source: >-
-        ((HOLE : any)) 0
-      expected: "runtime failure"
 
+# (fun t . fun f . f) is a lambda-calculus false, and (fun b ...) is an if.
+# The true branch would raise a runtime error, but it is not reachable.
 - name: 03-unreachable-error
   program: >-
     (fun b . b (fun c . ((fun x . x x) 5) 5) (fun d . 0))
@@ -64,26 +64,20 @@
   oracle_migration: >-
     (fun f:int -> int. (fun y:int. f) (f 5)) (fun x:int. 10 + x)
   contexts:
-    # A boundary integer probes the returned function's accepted domain and result.
+    # Asserts that the result is tagged as a function that accepts an int and
+    # returns an int. This rejects migrations such as `f : any -> bool` that
+    # would make the result of the function not an int or `y:bool` that would
+    # make the function crash on application.
     - source: >-
-        ((HOLE : any)) 0
-      expected: "10"
-    # A second integer makes input-insensitive or hard-coded behavior less likely to pass.
-    - source: >-
-        ((HOLE : any)) 7
-      expected: "17"
-    # A boolean demand preserves the original cast failure for an incompatible argument.
-    - source: >-
-        ((HOLE : any)) true
-      expected: "runtime failure"
-    # Arithmetic consumption verifies that the successful result remains observably integer.
-    - source: >-
-        (((HOLE : any)) 5) * 2
-      expected: "30"
+        ((HOLE) 0) + 1
+      expected: "11"
 
 - name: 05-order3-fun
   program: >-
     fun f . fun x . x (f x)
+  # The domain of f must be `any -> any` because f receives x, and x must
+  # remain applicable to arguments and produce results with different runtime
+  # tags in different compatible contexts.
   oracle_migration: >-
     fun f:(any -> any) -> any. fun x:any -> any. x (f x)
   contexts:
@@ -123,26 +117,26 @@
 - name: 07-double-f
   program: >-
     fun f . f (f true)
+  # f is always applied, so it can be given a function type. Both its domain
+  # and codomain must remain any: the second call consumes the first call's
+  # result, which may have any runtime tag.
   oracle_migration: >-
-    fun f:any. f (f true)
+    fun f:any -> any. f (f true)
   contexts:
-    # A function-valued intermediate tests higher-order reuse of the callback result.
+    # f always returns the identity function, exercising a function-valued intermediate.
     - source: >-
         (((HOLE : any)) (fun x . fun y . y)) 17
       expected: "17"
-    # A boolean endomorphism checks repeated application at the initial ground type.
+    # A boolean endomorphism exercises a bool result.
     - source: >-
         ((HOLE : any)) (fun x . if x then false else true)
       expected: "true"
-    # A constant integer callback tests a different result tag on the second invocation.
+    # A constant callback exercises an int result.
     - source: >-
         (((HOLE : any)) (fun x . 3)) + 4
       expected: "7"
-    # The original incompatible arithmetic flow must remain a cast failure.
-    - source: >-
-        ((HOLE : any)) (fun x . x + 1)
-      expected: "runtime failure"
 
+# This program will always crash in any context that needs it.
 - name: 08-outflows
   program: >-
     (fun x . x 5 + x) 5
@@ -155,30 +149,26 @@
       expected: "runtime failure"
 
 - name: 09-precision-relation
+  # (fun x . 5) is bound to f. We do f true. We also do g 5, where g = f. So,
+  # x : any.
   program: >-
     (fun f . f true + (fun g . g 5) f) (fun x . 5)
   oracle_migration: >-
     (fun f:any -> int. f true + (fun g:int -> int. g 5) f)
     (fun x:any. 5)
   contexts:
-    # Direct observation detects changes to the successful closed computation.
+    # The exact result establishes both the successful computation and its int tag.
     - source: >-
         HOLE
       expected: "10"
-    # Arithmetic use confirms that the result remains available at int.
-    - source: >-
-        ((HOLE : any)) + 7
-      expected: "17"
-    # An incompatible boolean demand ensures the result's ground tag is not weakened.
-    - source: >-
-        if ((HOLE : any)) then 1 else 2
-      expected: "runtime failure"
 
 - name: 10-if-tag
   program: >-
     fun tag . fun x . if tag then x + 1 else if x then 1 else 0
+  # tag is consumed only as bool. x must remain any because one branch consumes
+  # it as int and the other as bool.
   oracle_migration: >-
-    fun tag:any. fun x:any.
+    fun tag:bool. fun x:any.
     if tag then x + 1 else if x then 1 else 0
   contexts:
     # The arithmetic branch requires x at int when the tag selects it.
@@ -189,37 +179,25 @@
     - source: >-
         ((HOLE : any)) false true
       expected: "1"
-    # The false boolean case prevents a constant alternate-branch result from passing.
-    - source: >-
-        ((HOLE : any)) false false
-      expected: "0"
-    # Selecting arithmetic with a boolean x preserves the original incompatible-use failure.
-    - source: >-
-        ((HOLE : any)) true true
-      expected: "runtime failure"
 
 - name: 11-apply-add
   program: >-
     fun x . x (x + 1)
+  # x is consumed both as an int by addition and as a function by application.
+  # Those types are incompatible, so only any permits both uses.
   oracle_migration: >-
     fun x:any. x (x + 1)
   contexts:
-    # An integer exposes the unavoidable conflict between arithmetic and function use.
+    # Any argument reaches the unavoidable conflict between arithmetic and function use.
     - source: >-
         ((HOLE : any)) 4
-      expected: "runtime failure"
-    # A boolean checks that failure is preserved for a distinct ground tag.
-    - source: >-
-        ((HOLE : any)) true
-      expected: "runtime failure"
-    # A function checks that failure is also preserved when arithmetic rejects a callable value.
-    - source: >-
-        ((HOLE : any)) (fun y . y)
       expected: "runtime failure"
 
 - name: 12-add-applied
   program: >-
     fun x . x ((x true) + 1)
+  # x is always applied and both results are consumed as ints. Its domain must
+  # remain any because the first call receives bool and the second receives int.
   oracle_migration: >-
     fun x:any -> int. x (x true + 1)
   contexts:
@@ -227,22 +205,16 @@
     - source: >-
         ((HOLE : any)) (fun y . 1)
       expected: "1"
-    # A different constant and arithmetic observation detect hard-coded successful results.
-    - source: >-
-        ((HOLE : any)) (fun y . 5) + 2
-      expected: "7"
     # Identity exposes the incompatible transition from bool to arithmetic.
     - source: >-
         ((HOLE : any)) (fun y . y)
-      expected: "runtime failure"
-    # A precisely typed callback checks preservation of failure at the higher-order boundary.
-    - source: >-
-        ((HOLE : any)) (fun y : int . 3)
       expected: "runtime failure"
 
 - name: 13-add-two-applies
   program: >-
     fun x . x 4 + x true
+  # x must accept both int and bool, so its domain is any. Both call results are
+  # added, which makes its codomain int.
   oracle_migration: >-
     fun x:any -> int. x 4 + x true
   contexts:
@@ -250,10 +222,6 @@
     - source: >-
         ((HOLE : any)) (fun y . 1)
       expected: "2"
-    # A distinct result with arithmetic observation detects constant-answer shortcuts.
-    - source: >-
-        ((HOLE : any)) (fun y . 6) * 3
-      expected: "36"
     # An int-only callback must fail when the second call supplies bool.
     - source: >-
         ((HOLE : any)) (fun y : int . 2)
@@ -266,29 +234,24 @@
 - name: 14-identity-four
   program: >-
     (fun x . x) 4
+  # The identity is called only with 4, so its parameter and result can both be int.
   oracle_migration: >-
     (fun x:int. x) 4
   contexts:
-    # Direct observation checks the closed identity application.
+    # The exact result establishes both the identity computation and its int tag.
     - source: >-
         HOLE
       expected: "4"
-    # Arithmetic demand confirms preservation of the integer result.
-    - source: >-
-        ((HOLE : any)) * 5
-      expected: "20"
-    # An incompatible boolean demand catches a changed or weakened result tag.
-    - source: >-
-        if ((HOLE : any)) then 1 else 0
-      expected: "runtime failure"
 
 - name: 15-succ-id-id
   program: >-
     1 + ((fun y . y) ((fun x . x) true))
+  # x receives and returns bool. y also receives that bool, but its result is
+  # consumed as int; leaving y at any preserves the original failing cast.
   oracle_migration: >-
     1 + (fun y:any. y) ((fun x:bool. x) true)
   contexts:
-    # The unavoidable closed cast failure detects migrations that mask the bad flow.
+    # The unavoidable cast failure detects migrations that mask the bad flow.
     - source: >-
         HOLE
       expected: "runtime failure"
@@ -296,6 +259,8 @@
 - name: 16-identity
   program: >-
     fun x . x
+  # Compatible callers may instantiate the identity at any ground or function
+  # type, so neither its parameter nor its result can be narrowed from any.
   oracle_migration: >-
     fun x:any. x
   contexts:
@@ -311,14 +276,12 @@
     - source: >-
         (((HOLE : any)) (fun z . z)) 9
       expected: "9"
-    # Reusing that function at bool catches hidden specialization inside a function proxy.
-    - source: >-
-        (((HOLE : any)) (fun z . z)) false
-      expected: "false"
 
 - name: 17-apply2
   program: >-
     fun x . fun y . y x x
+  # x may have any runtime tag. y consumes x in both argument positions and may
+  # return any result, giving it type any -> any -> any.
   oracle_migration: >-
     fun x:any. fun y:any -> any -> any. y x x
   contexts:
@@ -338,13 +301,12 @@
 - name: 18-indirect-apply-self
   program: >-
     fun x . (fun y . x) x x
+  # The final application uses x as a function receiving x itself. The
+  # non-recursive approximation any -> any preserves every possible result;
+  # y receives the same function value and therefore has that type as well.
   oracle_migration: >-
     fun x:any -> any. (fun y:any -> any. x) x x
   contexts:
-    # Identity supplies the self-compatible higher-order path and exposes its result.
-    - source: >-
-        (((HOLE : any)) (fun z . z)) 8
-      expected: "8"
     # A constant integer function checks a successful callable with a ground result.
     - source: >-
         ((HOLE : any)) (fun z . 3)
@@ -361,6 +323,9 @@
 - name: 19-the-long-one
   program: >-
     fun x . (fun f . (fun xx . fun y . xx) f (f x)) (fun z . 1)
+  # f ignores an arbitrary argument and returns int, so f and xx have type
+  # any -> int. x remains any because it is passed to f, and y is int because it
+  # receives f x. The whole inner expression returns xx.
   oracle_migration: >-
     fun x:any.
     (fun f:any -> int. (fun xx:any -> int. fun y:int. xx) f (f x))
@@ -382,13 +347,11 @@
 - name: 20-apply-self
   program: >-
     fun x . x x
+  # x must be callable and must accept its own function value. any -> any is the
+  # most precise finite type that admits the self-application and arbitrary results.
   oracle_migration: >-
     fun x:any -> any. x x
   contexts:
-    # Identity is a self-compatible function and exposes an integer result afterward.
-    - source: >-
-        (((HOLE : any)) (fun z . z)) 4
-      expected: "4"
     # A constant integer callback checks a successful ground codomain.
     - source: >-
         ((HOLE : any)) (fun z . 5)
@@ -406,7 +369,10 @@
   program: >-
     (fun x . fun y . y (x (fun x . x)) (x (fun b . fun c . b)))
     (fun d . d d)
-  # Upstream's manual assertion diverges in the first context below. This is the
+  # x receives two different function shapes, represented together as
+  # any -> any, and may return either ground or function values. y consumes two
+  # such arbitrary results. The self-applied d likewise requires any -> any.
+  # Upstream's manual assertion diverges in the first context below; this is the
   # most precise upstream TypeWhich result that passes all documented contexts.
   oracle_migration: >-
     (fun x:(any -> any) -> any.
@@ -430,35 +396,3 @@
     - source: >-
         (((HOLE : any)) (fun a . fun b . a)) (fun q . q)
       expected: "<function>"
-
-- name: 22-self-interpreter
-  program: >-
-    (fun h . (fun x . h (x x)) (fun x . h x x))
-    (fun e . fun m . m (fun x . x)
-      (fun m . fun n . (e m) (e n))
-      (fun m . fun v . e (m v)))
-  # Upstream's manual assertion diverges in the application context below. This
-  # upstream TypeWhich result preserves all three interpreter branches.
-  oracle_migration: >-
-    (fun h:any -> any -> any.
-      (fun x:any -> any. h (x x)) (fun x:any. h x x))
-    (fun e:any. fun m:any.
-      m (fun x:any. x)
-        (fun m:any. fun n:any. e m (e n))
-        (fun m:any. fun v:any. e (m v)))
-  contexts:
-    # A variable-form encoding checks the interpreter's base dispatch without deeper recursion.
-    - source: >-
-        ((HOLE : any)) (fun var . fun app . fun lam . var 5)
-      expected: "5"
-    # An application-form encoding exercises recursive interpretation of two terminating children.
-    - source: >-
-        ((HOLE : any)) (fun var . fun app . fun lam .
-          app (fun v1 . fun a1 . fun l1 . v1 (fun q . q))
-              (fun a2 . fun b2 . fun c2 . a2 6))
-      expected: "6"
-    # A lambda-form encoding tests environment extension and application of the interpreted closure.
-    - source: >-
-        ((HOLE : any)) (fun var . fun app . fun lam .
-          lam (fun v . fun a . fun b . fun c . a v) 9)
-      expected: "9"

@@ -1,3 +1,13 @@
+(** Grader for compatible gradual type migrations.
+
+    Each benchmark supplies an original program, an expert migration, and
+    closing contexts with recorded outcomes. Before grading submissions, the
+    verifier authenticates the reference GTLC executable and validates every
+    fixture against both the original and expert programs. A candidate earns
+    credit only when it is a syntactic migration and matches the original in
+    every context. Its score is then determined by its number of [any]
+    decorations relative to the expert migration. *)
+
 module Paths = struct
   let migrator = "/app/migrate"
   let environment_gtlc = "/app/gtlc/_build/default/gtlc.exe"
@@ -46,6 +56,8 @@ let copy_file source destination =
           in
           copy ()))
 
+(** Copy the environment's GTLC executable out of the agent-controlled tree,
+    authenticate it once, and make the private copy read-and-execute only. *)
 let install_trusted_gtlc () =
   let path = Filename.temp_file "trusted-gtlc-" ".exe" in
   try
@@ -79,6 +91,9 @@ let validate_fixture (case : Fixtures.case) =
 let fill_context context expression =
   Str.global_replace (Str.regexp_string "HOLE") ("(" ^ expression ^ ")") context
 
+(** An observable result of running a closed GTLC program. Static failures are
+    represented separately because they invalidate trusted fixtures, whereas a
+    guarded cast failure is an ordinary dynamic outcome. *)
 type outcome =
   | Value of string
   | Runtime_failure
@@ -106,6 +121,8 @@ let reports_static_failure stderr =
   contains ~substring:"static error:" stderr
   || contains ~substring:"parse error:" stderr
 
+(** Run [source] with the trusted evaluator. Exceeding the execution deadline
+    represents divergence; other dynamic failures represent failed casts. *)
 let execute ~gtlc source =
   with_source_file "gtlc-exec-" source (fun path ->
       match
@@ -130,6 +147,8 @@ let expected_outcomes (case : Fixtures.case) =
     (fun context -> parse_expected_outcome context.Fixtures.expected)
     case.contexts
 
+(** Ask the trusted implementation for the benchmark precision metric. Only
+    decorations whose complete type is [any] are counted. *)
 let count_anys ~gtlc source =
   with_source_file "gtlc-count-anys-" source (fun path ->
       match
@@ -159,6 +178,8 @@ let run_migrator input_path =
            (Command.diagnostic output))
   | Ok output -> Ok output.stdout
 
+(** Check that both programs type-check and that [migrated] differs from
+    [original] only through pointwise-more-precise corresponding types. *)
 let check_migration ~gtlc original migrated =
   with_source_file "gtlc-original-" original (fun original_path ->
       with_source_file "gtlc-migrated-" migrated (fun migrated_path ->
@@ -194,6 +215,10 @@ let first_difference expected actual =
 type passing_grade = { oracle_anys : int; migrated_anys : int; score : float }
 type fixture = { specification : Fixtures.case; expected : outcome list }
 
+(** Validate trusted benchmark data before invoking the submitted migrator.
+    The expert must be a valid migration, and both the original and expert must
+    produce every outcome recorded in YAML. The observed original outcomes are
+    retained as the candidate's behavioral baseline. *)
 let prepare_fixture ~gtlc (case : Fixtures.case) =
   validate_fixture case;
   (match check_migration ~gtlc case.program case.oracle_migration with
@@ -218,6 +243,9 @@ let prepare_fixture ~gtlc (case : Fixtures.case) =
            case.name (show_outcome actual) index (show_outcome expected)));
   { specification = case; expected = original }
 
+(** Compute expert-relative precision credit. A candidate with fewer [any]
+    decorations than the expert indicates a bad expert or insufficient contexts
+    and therefore aborts verification instead of awarding unsound credit. *)
 let precision_grade ~gtlc (case : Fixtures.case) migrated =
   let oracle_anys = count_anys ~gtlc case.oracle_migration in
   let migrated_anys = count_anys ~gtlc migrated in
@@ -232,6 +260,9 @@ let precision_grade ~gtlc (case : Fixtures.case) migrated =
   in
   { oracle_anys; migrated_anys; score }
 
+(** Grade one challenge. Migration-tool failures, invalid migrations, static
+    failures in a candidate-filled context, and behavioral differences all
+    yield zero for this challenge. *)
 let grade ~gtlc (fixture : fixture) =
   let case = fixture.specification in
   with_source_file
@@ -266,6 +297,8 @@ let grade_all ~gtlc fixtures =
           total_score)
     0. fixtures
 
+(** Authenticate dependencies, validate all fixtures, grade every challenge,
+    and write the mean per-challenge reward expected by Harbor. *)
 let run () =
   try
     let gtlc = install_trusted_gtlc () in
