@@ -7,7 +7,7 @@ let parse_file path =
 
 let exec path =
   match parse_file path with
-  | Error message -> `Error (false, message)
+  | Error message -> `Error (false, "parse error: " ^ message)
   | Ok expression -> (
       try
         let outcome = Semantics.run expression in
@@ -19,8 +19,10 @@ let exec path =
         in
         print_endline output;
         `Ok ()
-      with Semantics.Static_error message | Semantics.Runtime_error message ->
-        `Error (false, message))
+      with
+      | Semantics.Static_error message -> `Error (false, "static error: " ^ message)
+      | Semantics.Runtime_error message ->
+          `Error (false, "runtime error: " ^ message))
 
 
 let is_migration original_path migrated_path =
@@ -71,8 +73,9 @@ let is_migration_command =
         "First type-checks both programs. A static error is reported as a command \
          error, not as false. For two well-typed programs, prints true exactly when \
          they have identical non-type syntax, including variable and binder names, and \
-         every type annotation in MIGRATED is at least as precise as its corresponding \
-         annotation in ORIGINAL. A missing annotation denotes any.";
+         the complete expression structure is identical, including the presence of \
+         every ascription, and every type in MIGRATED is at least as precise as its \
+         corresponding type in ORIGINAL. A missing lambda annotation denotes any.";
       `P "The result is determined by the programs' syntax and type decorations."
     ]
   in

@@ -2,11 +2,12 @@
   program: >-
     (fun f . f true) (fun x . x + 100)
   oracle_migration: >-
-    (fun f:bool -> int. f true) (fun x:bool. x + 100)
+    (fun f:bool -> int. f true) (fun x:any. x + 100)
   contexts:
     # The expression crashes in any context that needs it.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "runtime failure"
 
 - name: 02-rank2-poly-id
   program: >-
@@ -15,17 +16,21 @@
     (fun i:any -> any. (fun a:any. i true) (i 5)) (fun x:any. x)
   contexts:
     # Direct observation catches a migration that changes the result tag or fails early.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "true"
     # A boolean demand checks that the dynamically returned boolean remains usable as bool.
-    - >-
-      if (HOLE) then 11 else 12
+    - source: >-
+        if ((HOLE : any)) then 11 else 12
+      expected: "11"
     # An incompatible integer demand detects a migration that incorrectly permits the result as int.
-    - >-
-      (HOLE) + 1
+    - source: >-
+        ((HOLE : any)) + 1
+      expected: "runtime failure"
     # An incompatible function demand detects a migration that changes the result into a callable value.
-    - >-
-      (HOLE) 0
+    - source: >-
+        ((HOLE : any)) 0
+      expected: "runtime failure"
 
 - name: 03-unreachable-error
   program: >-
@@ -33,21 +38,25 @@
     (fun t . fun f . f)
   oracle_migration: >-
     (fun b:(any -> any) -> (any -> int) -> any -> int.
-      b (fun c:any. (fun x:int. x x) 5 5) (fun d:any. 0))
+      b (fun c:any. (fun x:any. x x) 5 5) (fun d:any. 0))
     (fun t:any -> any. fun f:any -> int. f)
   contexts:
     # A boolean argument detects an unsafe narrowing of the returned function's domain.
-    - >-
-      (HOLE) true
+    - source: >-
+        ((HOLE : any)) true
+      expected: "0"
     # An integer argument tests the same dynamic domain at a distinct ground tag.
-    - >-
-      (HOLE) 42
+    - source: >-
+        ((HOLE : any)) 42
+      expected: "0"
     # A function argument ensures higher-order values remain accepted across the boundary.
-    - >-
-      (HOLE) (fun q . q)
+    - source: >-
+        ((HOLE : any)) (fun q . q)
+      expected: "0"
     # Consuming the result as int checks its codomain as well as its permissive domain.
-    - >-
-      ((HOLE) false) + 1
+    - source: >-
+        (((HOLE : any)) false) + 1
+      expected: "1"
 
 - name: 04-f-in-f-out
   program: >-
@@ -56,17 +65,21 @@
     (fun f:int -> int. (fun y:int. f) (f 5)) (fun x:int. 10 + x)
   contexts:
     # A boundary integer probes the returned function's accepted domain and result.
-    - >-
-      (HOLE) 0
+    - source: >-
+        ((HOLE : any)) 0
+      expected: "10"
     # A second integer makes input-insensitive or hard-coded behavior less likely to pass.
-    - >-
-      (HOLE) 7
+    - source: >-
+        ((HOLE : any)) 7
+      expected: "17"
     # A boolean demand preserves the original cast failure for an incompatible argument.
-    - >-
-      (HOLE) true
+    - source: >-
+        ((HOLE : any)) true
+      expected: "runtime failure"
     # Arithmetic consumption verifies that the successful result remains observably integer.
-    - >-
-      ((HOLE) 5) * 2
+    - source: >-
+        (((HOLE : any)) 5) * 2
+      expected: "30"
 
 - name: 05-order3-fun
   program: >-
@@ -75,14 +88,17 @@
     fun f:(any -> any) -> any. fun x:any -> any. x (f x)
   contexts:
     # The original TypeWhich witness exercises a higher-order identity flow ending in bool.
-    - >-
-      (HOLE) (fun a . a) (fun b . true)
+    - source: >-
+        ((HOLE : any)) (fun a . a) (fun b . true)
+      expected: "true"
     # An integer flow through both callbacks catches ground-type over-specialization.
-    - >-
-      (HOLE) (fun a . 0) (fun b . b + 1)
+    - source: >-
+        ((HOLE : any)) (fun a . 0) (fun b . b + 1)
+      expected: "1"
     # A boolean flow into a conditional distinguishes it from the integer instantiation.
-    - >-
-      (HOLE) (fun a . true) (fun b . if b then 8 else 9)
+    - source: >-
+        ((HOLE : any)) (fun a . true) (fun b . if b then 8 else 9)
+      expected: "8"
 
 - name: 06-order3-intfun
   program: >-
@@ -92,14 +108,17 @@
     fun g:int -> int. (f g) ((g 10) + 1)
   contexts:
     # The original witness observes a boolean result while exercising the required integer flow.
-    - >-
-      (HOLE) (fun a . fun b . true) (fun c . 0)
+    - source: >-
+        ((HOLE : any)) (fun a . fun b . true) (fun c . 0)
+      expected: "true"
     # An arithmetic callback checks that intermediate and final integer contracts are preserved.
-    - >-
-      (HOLE) (fun a . fun b . b * 2) (fun c . c + 1)
+    - source: >-
+        ((HOLE : any)) (fun a . fun b . b * 2) (fun c . c + 1)
+      expected: "24"
     # A higher-order result catches migrations that unnecessarily restrict the final codomain.
-    - >-
-      ((HOLE) (fun a . fun b . fun q . b + q) (fun c . 3)) 4
+    - source: >-
+        (((HOLE : any)) (fun a . fun b . fun q . b + q) (fun c . 3)) 4
+      expected: "8"
 
 - name: 07-double-f
   program: >-
@@ -108,27 +127,32 @@
     fun f:any. f (f true)
   contexts:
     # A function-valued intermediate tests higher-order reuse of the callback result.
-    - >-
-      ((HOLE) (fun x . fun y . y)) 17
+    - source: >-
+        (((HOLE : any)) (fun x . fun y . y)) 17
+      expected: "17"
     # A boolean endomorphism checks repeated application at the initial ground type.
-    - >-
-      (HOLE) (fun x . if x then false else true)
+    - source: >-
+        ((HOLE : any)) (fun x . if x then false else true)
+      expected: "true"
     # A constant integer callback tests a different result tag on the second invocation.
-    - >-
-      ((HOLE) (fun x . 3)) + 4
+    - source: >-
+        (((HOLE : any)) (fun x . 3)) + 4
+      expected: "7"
     # The original incompatible arithmetic flow must remain a cast failure.
-    - >-
-      (HOLE) (fun x . x + 1)
+    - source: >-
+        ((HOLE : any)) (fun x . x + 1)
+      expected: "runtime failure"
 
 - name: 08-outflows
   program: >-
     (fun x . x 5 + x) 5
   oracle_migration: >-
-    (fun x:int. x 5 + x) 5
+    (fun x:any. x 5 + x) 5
   contexts:
     # The closed failure detects any annotation that changes the unavoidable bad outflow.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "runtime failure"
 
 - name: 09-precision-relation
   program: >-
@@ -138,14 +162,17 @@
     (fun x:any. 5)
   contexts:
     # Direct observation detects changes to the successful closed computation.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "10"
     # Arithmetic use confirms that the result remains available at int.
-    - >-
-      (HOLE) + 7
+    - source: >-
+        ((HOLE : any)) + 7
+      expected: "17"
     # An incompatible boolean demand ensures the result's ground tag is not weakened.
-    - >-
-      if (HOLE) then 1 else 2
+    - source: >-
+        if ((HOLE : any)) then 1 else 2
+      expected: "runtime failure"
 
 - name: 10-if-tag
   program: >-
@@ -155,33 +182,40 @@
     if tag then x + 1 else if x then 1 else 0
   contexts:
     # The arithmetic branch requires x at int when the tag selects it.
-    - >-
-      (HOLE) true 1
+    - source: >-
+        ((HOLE : any)) true 1
+      expected: "2"
     # The alternate branch requires x at bool and observes its true case.
-    - >-
-      (HOLE) false true
+    - source: >-
+        ((HOLE : any)) false true
+      expected: "1"
     # The false boolean case prevents a constant alternate-branch result from passing.
-    - >-
-      (HOLE) false false
+    - source: >-
+        ((HOLE : any)) false false
+      expected: "0"
     # Selecting arithmetic with a boolean x preserves the original incompatible-use failure.
-    - >-
-      (HOLE) true true
+    - source: >-
+        ((HOLE : any)) true true
+      expected: "runtime failure"
 
 - name: 11-apply-add
   program: >-
     fun x . x (x + 1)
   oracle_migration: >-
-    fun x:any -> any. x (x + 1)
+    fun x:any. x (x + 1)
   contexts:
     # An integer exposes the unavoidable conflict between arithmetic and function use.
-    - >-
-      (HOLE) 4
+    - source: >-
+        ((HOLE : any)) 4
+      expected: "runtime failure"
     # A boolean checks that failure is preserved for a distinct ground tag.
-    - >-
-      (HOLE) true
+    - source: >-
+        ((HOLE : any)) true
+      expected: "runtime failure"
     # A function checks that failure is also preserved when arithmetic rejects a callable value.
-    - >-
-      (HOLE) (fun y . y)
+    - source: >-
+        ((HOLE : any)) (fun y . y)
+      expected: "runtime failure"
 
 - name: 12-add-applied
   program: >-
@@ -190,17 +224,21 @@
     fun x:any -> int. x (x true + 1)
   contexts:
     # A constant callback supplies the polymorphic-looking uses while producing a stable int.
-    - >-
-      (HOLE) (fun y . 1)
+    - source: >-
+        ((HOLE : any)) (fun y . 1)
+      expected: "1"
     # A different constant and arithmetic observation detect hard-coded successful results.
-    - >-
-      (HOLE) (fun y . 5) + 2
+    - source: >-
+        ((HOLE : any)) (fun y . 5) + 2
+      expected: "7"
     # Identity exposes the incompatible transition from bool to arithmetic.
-    - >-
-      (HOLE) (fun y . y)
+    - source: >-
+        ((HOLE : any)) (fun y . y)
+      expected: "runtime failure"
     # A precisely typed callback checks preservation of failure at the higher-order boundary.
-    - >-
-      (HOLE) (fun y : int . 3)
+    - source: >-
+        ((HOLE : any)) (fun y : int . 3)
+      expected: "runtime failure"
 
 - name: 13-add-two-applies
   program: >-
@@ -209,17 +247,21 @@
     fun x:any -> int. x 4 + x true
   contexts:
     # A constant callback witnesses successful use at both argument tags.
-    - >-
-      (HOLE) (fun y . 1)
+    - source: >-
+        ((HOLE : any)) (fun y . 1)
+      expected: "2"
     # A distinct result with arithmetic observation detects constant-answer shortcuts.
-    - >-
-      (HOLE) (fun y . 6) * 3
+    - source: >-
+        ((HOLE : any)) (fun y . 6) * 3
+      expected: "36"
     # An int-only callback must fail when the second call supplies bool.
-    - >-
-      (HOLE) (fun y : int . 2)
+    - source: >-
+        ((HOLE : any)) (fun y : int . 2)
+      expected: "runtime failure"
     # A bool-only callback must fail when the first call supplies int.
-    - >-
-      (HOLE) (fun y : bool . 3)
+    - source: >-
+        ((HOLE : any)) (fun y : bool . 3)
+      expected: "runtime failure"
 
 - name: 14-identity-four
   program: >-
@@ -228,24 +270,28 @@
     (fun x:int. x) 4
   contexts:
     # Direct observation checks the closed identity application.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "4"
     # Arithmetic demand confirms preservation of the integer result.
-    - >-
-      (HOLE) * 5
+    - source: >-
+        ((HOLE : any)) * 5
+      expected: "20"
     # An incompatible boolean demand catches a changed or weakened result tag.
-    - >-
-      if (HOLE) then 1 else 0
+    - source: >-
+        if ((HOLE : any)) then 1 else 0
+      expected: "runtime failure"
 
 - name: 15-succ-id-id
   program: >-
     1 + ((fun y . y) ((fun x . x) true))
   oracle_migration: >-
-    1 + (fun y:bool. y) ((fun x:bool. x) true)
+    1 + (fun y:any. y) ((fun x:bool. x) true)
   contexts:
     # The unavoidable closed cast failure detects migrations that mask the bad flow.
-    - >-
-      HOLE
+    - source: >-
+        HOLE
+      expected: "runtime failure"
 
 - name: 16-identity
   program: >-
@@ -254,17 +300,21 @@
     fun x:any. x
   contexts:
     # An integer call rejects unsafe specialization of the identity's domain or codomain.
-    - >-
-      (HOLE) 7
+    - source: >-
+        ((HOLE : any)) 7
+      expected: "7"
     # A boolean call tests the same polymorphic behavior at another ground tag.
-    - >-
-      (HOLE) true
+    - source: >-
+        ((HOLE : any)) true
+      expected: "true"
     # A function value followed by integer use exercises higher-order identity behavior.
-    - >-
-      ((HOLE) (fun z . z)) 9
+    - source: >-
+        (((HOLE : any)) (fun z . z)) 9
+      expected: "9"
     # Reusing that function at bool catches hidden specialization inside a function proxy.
-    - >-
-      ((HOLE) (fun z . z)) false
+    - source: >-
+        (((HOLE : any)) (fun z . z)) false
+      expected: "false"
 
 - name: 17-apply2
   program: >-
@@ -273,14 +323,17 @@
     fun x:any. fun y:any -> any -> any. y x x
   contexts:
     # Integer duplication tests both argument positions and an integer-producing consumer.
-    - >-
-      (HOLE) 1 (fun a . fun b . a + b)
+    - source: >-
+        ((HOLE : any)) 1 (fun a . fun b . a + b)
+      expected: "2"
     # Boolean duplication detects specialization to the integer instantiation.
-    - >-
-      (HOLE) true (fun a . fun b . if a then b else false)
+    - source: >-
+        ((HOLE : any)) true (fun a . fun b . if a then b else false)
+      expected: "true"
     # A function-valued x probes higher-order duplication and subsequent application.
-    - >-
-      ((HOLE) (fun z . z) (fun a . fun b . a)) 6
+    - source: >-
+        (((HOLE : any)) (fun z . z) (fun a . fun b . a)) 6
+      expected: "6"
 
 - name: 18-indirect-apply-self
   program: >-
@@ -289,17 +342,21 @@
     fun x:any -> any. (fun y:any -> any. x) x x
   contexts:
     # Identity supplies the self-compatible higher-order path and exposes its result.
-    - >-
-      ((HOLE) (fun z . z)) 8
+    - source: >-
+        (((HOLE : any)) (fun z . z)) 8
+      expected: "8"
     # A constant integer function checks a successful callable with a ground result.
-    - >-
-      (HOLE) (fun z . 3)
+    - source: >-
+        ((HOLE : any)) (fun z . 3)
+      expected: "3"
     # A constant boolean function distinguishes ground codomain specialization.
-    - >-
-      (HOLE) (fun z . true)
+    - source: >-
+        ((HOLE : any)) (fun z . true)
+      expected: "true"
     # A function-producing callback checks that the result may remain higher order.
-    - >-
-      ((HOLE) (fun z . fun w . w)) false
+    - source: >-
+        (((HOLE : any)) (fun z . fun w . w)) false
+      expected: "false"
 
 - name: 19-the-long-one
   program: >-
@@ -310,14 +367,17 @@
     (fun z:any. 1)
   contexts:
     # Boolean input with integer consumption exercises the original witness path.
-    - >-
-      (HOLE) true 1
+    - source: >-
+        ((HOLE : any)) true 1
+      expected: "1"
     # An integer input paired with bool checks that neither exposed argument is over-specialized.
-    - >-
-      (HOLE) 4 false
+    - source: >-
+        ((HOLE : any)) 4 false
+      expected: "1"
     # Higher-order values at both exposed positions test preservation beyond ground tags.
-    - >-
-      (HOLE) (fun q . q) (fun r . r)
+    - source: >-
+        ((HOLE : any)) (fun q . q) (fun r . r)
+      expected: "1"
 
 - name: 20-apply-self
   program: >-
@@ -326,17 +386,21 @@
     fun x:any -> any. x x
   contexts:
     # Identity is a self-compatible function and exposes an integer result afterward.
-    - >-
-      ((HOLE) (fun z . z)) 4
+    - source: >-
+        (((HOLE : any)) (fun z . z)) 4
+      expected: "4"
     # A constant integer callback checks a successful ground codomain.
-    - >-
-      (HOLE) (fun z . 5)
+    - source: >-
+        ((HOLE : any)) (fun z . 5)
+      expected: "5"
     # A constant boolean callback detects codomain specialization to int.
-    - >-
-      (HOLE) (fun z . true)
+    - source: >-
+        ((HOLE : any)) (fun z . true)
+      expected: "true"
     # A function-producing callback tests a higher-order result after self-application.
-    - >-
-      ((HOLE) (fun z . fun w . w)) false
+    - source: >-
+        (((HOLE : any)) (fun z . fun w . w)) false
+      expected: "false"
 
 - name: 21-untypable-in-sys-f
   program: >-
@@ -351,17 +415,21 @@
     (fun d:any -> any. d d)
   contexts:
     # An integer-selecting consumer tests the first computed value at a ground codomain.
-    - >-
-      (HOLE) (fun a . fun b . a) 7
+    - source: >-
+        ((HOLE : any)) (fun a . fun b . a) 7
+      expected: "7"
     # Changing only that selected ground tag detects integer specialization.
-    - >-
-      (HOLE) (fun a . fun b . a) true
+    - source: >-
+        ((HOLE : any)) (fun a . fun b . a) true
+      expected: "true"
     # Selecting the other computed value and applying it exercises its higher-order shape.
-    - >-
-      (HOLE) (fun a . fun b . b) true false 9
+    - source: >-
+        ((HOLE : any)) (fun a . fun b . b) true false 9
+      expected: "false"
     # Higher-order consumption of the selected value checks function-level precision boundaries.
-    - >-
-      ((HOLE) (fun a . fun b . a)) (fun q . q)
+    - source: >-
+        (((HOLE : any)) (fun a . fun b . a)) (fun q . q)
+      expected: "<function>"
 
 - name: 22-self-interpreter
   program: >-
@@ -369,30 +437,28 @@
     (fun e . fun m . m (fun x . x)
       (fun m . fun n . (e m) (e n))
       (fun m . fun v . e (m v)))
+  # Upstream's manual assertion diverges in the application context below. This
+  # upstream TypeWhich result preserves all three interpreter branches.
   oracle_migration: >-
-    (fun h:((any -> any) -> (any -> any -> any) ->
-            ((any -> any) -> any -> any) -> any) ->
-           ((any -> any) -> (any -> any -> any) ->
-            ((any -> any) -> any -> any) -> any) -> any.
-      (fun x:any -> any. h (x x))
-      (fun x:(any -> any) -> (any -> any -> any) ->
-             ((any -> any) -> any -> any) -> any. h x x))
-    (fun e:any.
-      fun m:(any -> any) -> (any -> any -> any) ->
-            ((any -> any) -> any -> any) -> any.
-        m (fun x:any. x)
-          (fun m:any. fun n:any. e m (e n))
-          (fun m:any -> any. fun v:any. e (m v)))
+    (fun h:any -> any -> any.
+      (fun x:any -> any. h (x x)) (fun x:any. h x x))
+    (fun e:any. fun m:any.
+      m (fun x:any. x)
+        (fun m:any. fun n:any. e m (e n))
+        (fun m:any. fun v:any. e (m v)))
   contexts:
     # A variable-form encoding checks the interpreter's base dispatch without deeper recursion.
-    - >-
-      (HOLE) (fun var . fun app . fun lam . var 5)
+    - source: >-
+        ((HOLE : any)) (fun var . fun app . fun lam . var 5)
+      expected: "5"
     # An application-form encoding exercises recursive interpretation of two terminating children.
-    - >-
-      (HOLE) (fun var . fun app . fun lam .
-        app (fun v1 . fun a1 . fun b1 . fun c1 . a1 (fun q . q))
-            (fun a2 . fun b2 . fun c2 . a2 6))
+    - source: >-
+        ((HOLE : any)) (fun var . fun app . fun lam .
+          app (fun v1 . fun a1 . fun l1 . v1 (fun q . q))
+              (fun a2 . fun b2 . fun c2 . a2 6))
+      expected: "6"
     # A lambda-form encoding tests environment extension and application of the interpreted closure.
-    - >-
-      (HOLE) (fun var . fun app . fun lam .
-        lam (fun v . fun a . fun b . fun c . a v) 9)
+    - source: >-
+        ((HOLE : any)) (fun var . fun app . fun lam .
+          lam (fun v . fun a . fun b . fun c . a v) 9)
+      expected: "9"

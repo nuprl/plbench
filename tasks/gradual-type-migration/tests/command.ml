@@ -27,8 +27,8 @@ let run ~timeout_seconds ~executable ~arguments =
     (fun () ->
       let words = List.map Filename.quote (executable :: arguments) in
       let command =
-        Printf.sprintf "timeout %ds %s > %s 2> %s" timeout_seconds
-          (String.concat " " words)
+        Printf.sprintf "timeout --preserve-status %ds %s > %s 2> %s"
+          timeout_seconds (String.concat " " words)
           (Filename.quote stdout_path)
           (Filename.quote stderr_path)
       in

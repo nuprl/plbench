@@ -2,25 +2,7 @@ open Syntax
 
 let annotation_type = Option.value ~default:Any
 
-let rec peel_ascriptions types = function
-  | Ann (expression, typ) -> peel_ascriptions (typ :: types) expression
-  | expression -> (List.rev types, expression)
-
-
-let rec types_leq left right =
-  match (left, right) with
-  | [], [] -> true
-  | left_type :: left, right_type :: right ->
-      Semantics.type_leq left_type right_type && types_leq left right
-  | [], right_type :: right -> Semantics.type_leq Any right_type && types_leq [] right
-  | left_type :: left, [] -> Semantics.type_leq left_type Any && types_leq left []
-
-
 let rec syntax_leq left right =
-  let left_types, left = peel_ascriptions [] left in
-  let right_types, right = peel_ascriptions [] right in
-  types_leq left_types right_types
-  &&
   match (left, right) with
   | Lit_int left, Lit_int right -> left = right
   | Lit_bool left, Lit_bool right -> left = right
@@ -43,6 +25,9 @@ let rec syntax_leq left right =
       String.equal left_name right_name
       && syntax_leq left_value right_value
       && syntax_leq left_body right_body
+  | Ann (left_expression, left_type), Ann (right_expression, right_type) ->
+      Semantics.type_leq left_type right_type
+      && syntax_leq left_expression right_expression
   | _ -> false
 
 
@@ -62,19 +47,35 @@ let%test "precision is directional at every annotation" =
   not (check ~original:(parse "fun x : int . x") ~migrated:(parse "fun x : any . x"))
 
 
-let%test "an interior annotation cannot change to an incomparable type" =
-  not
-    (check
-       ~original:(parse "(fun f : int -> int . f 0) (fun x : int . x)")
-       ~migrated:(parse "(fun f : int -> int . f 0) (fun x : bool . x)"))
+let%test_unit "an ill-typed incomparable annotation raises" =
+  match
+    check
+      ~original:(parse "(fun f : int -> int . f 0) (fun x : int . x)")
+      ~migrated:(parse "(fun f : int -> int . f 0) (fun x : bool . x)")
+  with
+  | _ -> failwith "expected a static error"
+  | exception Semantics.Static_error _ -> ()
 
 
 let%test "binder names are syntax" =
   not (check ~original:(parse "fun x . x") ~migrated:(parse "fun y . y"))
 
 
-let%test "expression ascriptions are pointwise type decorations" =
-  check ~original:(parse "fun x . x") ~migrated:(parse "fun x : any . (x : int)")
+let%test "corresponding ascription types may become more precise" =
+  check ~original:(parse "fun x . (x : any)")
+    ~migrated:(parse "fun x : any . (x : int)")
+
+
+let%test "ascriptions cannot be inserted" =
+  not
+    (check ~original:(parse "fun x . x")
+       ~migrated:(parse "fun x : any . (x : any)"))
+
+
+let%test "ascriptions cannot be removed" =
+  not
+    (check ~original:(parse "fun x . (x : any)")
+       ~migrated:(parse "fun x : any . x"))
 
 
 let%test_unit "ill-typed programs raise instead of returning false" =

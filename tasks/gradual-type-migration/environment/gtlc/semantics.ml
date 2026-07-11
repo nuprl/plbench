@@ -44,6 +44,51 @@ let rec common_branch_type left right =
 
 let cast_ir source target expression = ICast (source, target, expression)
 
+let inconsistent context actual expected =
+  raise
+    (Static_error
+       (Printf.sprintf "%s has type %s, which is inconsistent with %s" context
+          (show_typ actual) (show_typ expected)))
+
+
+let require_consistent context actual expected =
+  if not (consistent actual expected) then inconsistent context actual expected
+
+
+let rec type_of environment = function
+  | Lit_int _ -> Int
+  | Lit_bool _ -> Bool
+  | Var name -> (
+      match List.assoc_opt name environment with
+      | Some typ -> typ
+      | None -> raise (Static_error ("unbound identifier " ^ name)))
+  | Fun (parameter, annotation, body) ->
+      let domain = Option.value ~default:Any annotation in
+      Arr (domain, type_of ((parameter, domain) :: environment) body)
+  | App (function_, argument) -> (
+      let function_type = type_of environment function_ in
+      let argument_type = type_of environment argument in
+      match function_type with
+      | Arr (domain, codomain) ->
+          require_consistent "application argument" argument_type domain;
+          codomain
+      | Any -> Any
+      | typ -> inconsistent "application operator" typ (Arr (Any, Any)))
+  | Bin (_, left, right) ->
+      require_consistent "left arithmetic operand" (type_of environment left) Int;
+      require_consistent "right arithmetic operand" (type_of environment right) Int;
+      Int
+  | If (condition, yes, no) ->
+      require_consistent "conditional guard" (type_of environment condition) Bool;
+      common_branch_type (type_of environment yes) (type_of environment no)
+  | Let (name, value, body) ->
+      let value_type = type_of environment value in
+      type_of ((name, value_type) :: environment) body
+  | Ann (expression, target) ->
+      require_consistent "ascribed expression" (type_of environment expression) target;
+      target
+
+
 let rec elaborate environment = function
   | Lit_int value -> (Int, ILit_int value)
   | Lit_bool value -> (Bool, ILit_bool value)
@@ -107,7 +152,7 @@ and elaborate_let environment name value body =
   (body_type, ILet (name, value, body))
 
 
-let infer expression = fst (elaborate [] expression)
+let infer expression = type_of [] expression
 
 let rec erase_ascriptions = function
   | Ann (expression, _) -> erase_ascriptions expression
@@ -271,6 +316,7 @@ let observe = function
 
 
 let run expression =
+  ignore (infer expression);
   let _, expression = elaborate [] expression in
   observe (evaluate [] expression)
 
@@ -285,7 +331,13 @@ let%test_unit "a static error is raised before evaluation" =
   | exception Static_error _ -> ()
 
 
-let%test_unit "a guarded cast can fail at runtime" =
+let%test_unit "an inconsistent ascription is rejected statically" =
   match run (Parser.parse "(true : int)") with
+  | _ -> failwith "expected a static error"
+  | exception Static_error _ -> ()
+
+
+let%test_unit "a consistent cast through any can fail at runtime" =
+  match run (Parser.parse "((true : any) : int)") with
   | _ -> failwith "expected a runtime error"
   | exception Runtime_error _ -> ()

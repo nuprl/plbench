@@ -5,9 +5,9 @@ module Paths = struct
   let reward = "/logs/verifier/reward.txt"
 end
 
-let expected_gtlc_md5 = "eeaca52811ad981325cf0e7114b29282"
+let expected_gtlc_md5 = "99e9a9ec4075280fd24e582bd77a89a8"
 let migration_timeout_seconds = 15
-let execution_timeout_seconds = 2
+let execution_timeout_seconds = 10
 
 let write_file path contents =
   let channel = open_out_bin path in
@@ -72,19 +72,39 @@ let validate_fixture (case : Fixtures.case) =
     failwith (case.name ^ ": contexts must not be empty");
   List.iter
     (fun context ->
-      if not (has_hole context) then
+      if not (has_hole context.Fixtures.source) then
         failwith (case.name ^ ": context does not contain HOLE"))
     case.contexts
 
 let fill_context context expression =
   Str.global_replace (Str.regexp_string "HOLE") ("(" ^ expression ^ ")") context
 
-type outcome = Value of string | Runtime_failure | Divergence
+type outcome =
+  | Value of string
+  | Runtime_failure
+  | Divergence
+  | Static_failure of string
 
 let show_outcome = function
   | Value value -> Printf.sprintf "value %S" value
   | Runtime_failure -> "runtime failure"
   | Divergence -> "divergence"
+  | Static_failure message -> Printf.sprintf "static failure (%s)" message
+
+let parse_expected_outcome = function
+  | "runtime failure" -> Runtime_failure
+  | "divergence" -> Divergence
+  | value -> Value value
+
+let contains ~substring text =
+  try
+    ignore (Str.search_forward (Str.regexp_string substring) text 0);
+    true
+  with Not_found -> false
+
+let reports_static_failure stderr =
+  contains ~substring:"static error:" stderr
+  || contains ~substring:"parse error:" stderr
 
 let execute ~gtlc source =
   with_source_file "gtlc-exec-" source (fun path ->
@@ -94,13 +114,21 @@ let execute ~gtlc source =
       with
       | Error message -> failwith ("cannot invoke trusted GTLC: " ^ message)
       | Ok { status = 0; stdout; _ } -> Value (String.trim stdout)
-      | Ok { status = 124; _ } -> Divergence
+      | Ok { status = 137 | 143; _ } -> Divergence
+      | Ok { stderr; _ } when reports_static_failure stderr ->
+          Static_failure (String.trim stderr)
       | Ok _ -> Runtime_failure)
 
 let outcomes ~gtlc case expression =
   List.map
-    (fun context -> execute ~gtlc (fill_context context expression))
+    (fun context ->
+      execute ~gtlc (fill_context context.Fixtures.source expression))
     case.Fixtures.contexts
+
+let expected_outcomes (case : Fixtures.case) =
+  List.map
+    (fun context -> parse_expected_outcome context.Fixtures.expected)
+    case.contexts
 
 let count_anys ~gtlc source =
   with_source_file "gtlc-count-anys-" source (fun path ->
@@ -164,6 +192,31 @@ let first_difference expected actual =
   search 1 expected actual
 
 type passing_grade = { oracle_anys : int; migrated_anys : int; score : float }
+type fixture = { specification : Fixtures.case; expected : outcome list }
+
+let prepare_fixture ~gtlc (case : Fixtures.case) =
+  validate_fixture case;
+  (match check_migration ~gtlc case.program case.oracle_migration with
+  | Ok () -> ()
+  | Error message ->
+      failwith
+        (Printf.sprintf "%s: best migration is invalid: %s" case.name message));
+  let recorded = expected_outcomes case in
+  let original = outcomes ~gtlc case case.program in
+  (match first_difference recorded original with
+  | None -> ()
+  | Some (index, expected, actual) ->
+      failwith
+        (Printf.sprintf "%s: original program has %s in context %d; expected %s"
+           case.name (show_outcome actual) index (show_outcome expected)));
+  let oracle = outcomes ~gtlc case case.oracle_migration in
+  (match first_difference recorded oracle with
+  | None -> ()
+  | Some (index, expected, actual) ->
+      failwith
+        (Printf.sprintf "%s: best migration has %s in context %d; expected %s"
+           case.name (show_outcome actual) index (show_outcome expected)));
+  { specification = case; expected = original }
 
 let precision_grade ~gtlc (case : Fixtures.case) migrated =
   let oracle_anys = count_anys ~gtlc case.oracle_migration in
@@ -179,8 +232,8 @@ let precision_grade ~gtlc (case : Fixtures.case) migrated =
   in
   { oracle_anys; migrated_anys; score }
 
-let grade ~gtlc (case : Fixtures.case) =
-  let expected = outcomes ~gtlc case case.program in
+let grade ~gtlc (fixture : fixture) =
+  let case = fixture.specification in
   with_source_file
     ("gtlc-challenge-" ^ case.name ^ "-")
     case.program
@@ -192,25 +245,26 @@ let grade ~gtlc (case : Fixtures.case) =
           | Error _ as error -> error
           | Ok () -> (
               let actual = outcomes ~gtlc case migrated in
-              match first_difference expected actual with
+              match first_difference fixture.expected actual with
               | None -> Ok (precision_grade ~gtlc case migrated)
               | Some (index, expected, actual) ->
                   Error
                     (Printf.sprintf "context %d changed outcome from %s to %s"
                        index (show_outcome expected) (show_outcome actual)))))
 
-let grade_all ~gtlc cases =
+let grade_all ~gtlc fixtures =
   List.fold_left
-    (fun total_score case ->
-      match grade ~gtlc case with
+    (fun total_score fixture ->
+      match grade ~gtlc fixture with
       | Ok grade ->
           Printf.printf "%s: PASS — anys=%d/%d; score=%.4f\n%!"
-            case.Fixtures.name grade.oracle_anys grade.migrated_anys grade.score;
+            fixture.specification.name grade.oracle_anys grade.migrated_anys
+            grade.score;
           total_score +. grade.score
       | Error message ->
-          Printf.printf "%s: FAIL — %s\n%!" case.Fixtures.name message;
+          Printf.printf "%s: FAIL — %s\n%!" fixture.specification.name message;
           total_score)
-    0. cases
+    0. fixtures
 
 let run () =
   try
@@ -225,9 +279,9 @@ let run () =
         end
         else
           let cases = Fixtures.load Paths.cases in
-          List.iter validate_fixture cases;
-          let total_score = grade_all ~gtlc cases in
-          let total = List.length cases in
+          let fixtures = List.map (prepare_fixture ~gtlc) cases in
+          let total_score = grade_all ~gtlc fixtures in
+          let total = List.length fixtures in
           let score = if total = 0 then 0. else total_score /. float total in
           Printf.printf "score=%.4f\n%!" score;
           write_reward score;

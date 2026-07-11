@@ -35,8 +35,8 @@ branches, let bodies, and expression ascriptions extend as far to the right as
 their enclosing parentheses allow.
 
 Task inputs use only `fun x . e`; `fun x : T . e` is required in migrated
-output. An expression ascription `(e : T)` may appear in migrated output. It
-is an explicit guarded cast, not a change to the underlying program.
+output. Expression ascriptions are part of the language, but a migration may
+neither insert nor remove one.
 
 ## Types, consistency, and precision
 
@@ -73,16 +73,15 @@ and its body has type `T`.
 At an application, a function of type `S -> T` accepts an argument whose type
 is consistent with `S` and produces `T`. A value of type `any` in function
 position is treated as `any -> any`. The two operands of `+` and `*` are used
-at type `int`, and their result is `int`. A conditional uses its condition at
-type `bool`; its branches are cast to their most precise common consistent
+at a type consistent with `int`, and their result is `int`. A conditional uses
+its condition at a type consistent with `bool`; its branches are cast to their
+most precise common consistent
 type, or to `any` when their types are incompatible. A let-bound variable has
 the type of its definition. An ascription `(e : T)` uses the value of `e` at
-type `T`.
+type `T` when its inferred type is consistent with `T`.
 
-Every use at a merely consistent type inserts a guarded runtime cast. Uses at
-inconsistent types are also accepted, but insert a cast that is certain to
-fail if reached. This choice is important: an error in unreachable code does
-not cause migration to reject the whole program.
+Every use at a merely consistent type inserts a guarded runtime cast. A use at
+an inconsistent type is rejected statically.
 
 ## Guarded runtime semantics
 
@@ -96,17 +95,16 @@ function to `any` attaches a `fun` tag and preserves its argument and result
 checks. Casting from `any` checks and removes the corresponding tag. Casting
 between function types is higher order: a cast from `S1 -> S2` to `T1 -> T2`
 checks arguments from `T1` to `S1` and results from `S2` to `T2`. Casting
-between inconsistent types proceeds through `any`, and therefore fails at the
-incompatible tag check when evaluated.
+through `any` checks the runtime tag and may fail.
 
 ## Compatible type migration
 
-Type decorations are lambda annotations and expression ascriptions. Ignoring
-type decorations, the original and migrated programs must have exactly the
-same syntax, including every variable and binder name. At each corresponding
-position, the original decoration type must be no more precise than the
-migrated decoration type. A missing decoration is treated as `any`. Both
-programs must be well typed.
+The original and migrated programs must have exactly the same expression
+structure, including every variable and binder name and the presence of every
+expression ascription. Only lambda annotation types and the types of existing
+ascriptions may differ. At each corresponding position, the original type must
+be no more precise than the migrated type. A missing lambda annotation is
+treated as `any`. Both programs must be well typed.
 
 The required safety property is the paper's stronger, context-restricted
 definition instantiated at `any`. For every well-typed closing context that

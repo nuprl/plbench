@@ -1,8 +1,8 @@
 (** Bounded subprocess invocation for the verifier. *)
 
 type output = { status : int; stdout : string; stderr : string }
-(** Captured process output and its numeric exit status. Status [124] denotes
-    expiration of the external timeout. *)
+(** Captured process output and its numeric exit status. The timeout wrapper
+    preserves the command's own status. *)
 
 val run :
   timeout_seconds:int ->
