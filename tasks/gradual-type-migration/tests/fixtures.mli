@@ -4,11 +4,10 @@ type case = {
   name : string;
   program : string;
   oracle_migration : string;
-  context : string option;
-  maximal_migrations : string list;
+  contexts : string list;
 }
-(** A challenge program, default TypeWhich's migration, an optional witness
-    context containing [HOLE], and its curated maximal compatible migrations. *)
+(** A challenge program, default TypeWhich migration, and closing contexts that
+    contain the token [HOLE]. *)
 
 val load : string -> case list
 (** Decode the YAML case array. *)

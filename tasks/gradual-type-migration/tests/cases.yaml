@@ -3,18 +3,29 @@
     (fun f . f true) (fun x . x + 100)
   oracle_migration: >-
     (fun f:bool -> int. f true) (fun x:bool. (x : any) + 100)
-  maximal_migrations:
+  contexts:
+    # The expression crashes in any context that needs it.
     - >-
-      (fun f:bool -> int. f true) (fun x:bool. (x : any) + 100)
+      HOLE
 
 - name: 02-rank2-poly-id
   program: >-
     (fun i . (fun a . i true) (i 5)) (fun x . x)
   oracle_migration: >-
     (fun i:any -> any. (fun a:any. i true) (i 5)) (fun x:any. x)
-  maximal_migrations:
+  contexts:
+    # Direct observation catches a migration that changes the result tag or fails early.
     - >-
-      (fun i:any -> any. (fun a:any. i true) (i 5)) (fun x:any. x)
+      HOLE
+    # A boolean demand checks that the dynamically returned boolean remains usable as bool.
+    - >-
+      if (HOLE) then 11 else 12
+    # An incompatible integer demand detects a migration that incorrectly permits the result as int.
+    - >-
+      (HOLE) + 1
+    # An incompatible function demand detects a migration that changes the result into a callable value.
+    - >-
+      (HOLE) 0
 
 - name: 03-unreachable-error
   program: >-
@@ -24,63 +35,99 @@
     (fun b:(any -> any) -> (any -> int) -> any -> int.
       b (fun c:any. (fun x:any. x x) 5 5) (fun d:any. 0))
     (fun t:any -> any. fun f:any -> int. f)
-  maximal_migrations:
+  contexts:
+    # A boolean argument detects an unsafe narrowing of the returned function's domain.
     - >-
-      (fun b:(any -> any) -> (any -> int) -> any -> int.
-        b (fun c:any. (fun x:int. x x) 5 5) (fun d:any. 0))
-      (fun t:any -> any. fun f:any -> int. f)
+      (HOLE) true
+    # An integer argument tests the same dynamic domain at a distinct ground tag.
+    - >-
+      (HOLE) 42
+    # A function argument ensures higher-order values remain accepted across the boundary.
+    - >-
+      (HOLE) (fun q . q)
+    # Consuming the result as int checks its codomain as well as its permissive domain.
+    - >-
+      ((HOLE) false) + 1
 
 - name: 04-f-in-f-out
   program: >-
     (fun f . (fun y . f) (f 5)) (fun x . 10 + x)
   oracle_migration: >-
     (fun f:any -> int. (fun y:int. f) (f 5)) (fun x:any. 10 + x)
-  maximal_migrations:
+  contexts:
+    # A boundary integer probes the returned function's accepted domain and result.
     - >-
-      (fun f:int -> int. (fun y:int. f) (f 5)) (fun x:int. 10 + x)
+      (HOLE) 0
+    # A second integer makes input-insensitive or hard-coded behavior less likely to pass.
+    - >-
+      (HOLE) 7
+    # A boolean demand preserves the original cast failure for an incompatible argument.
+    - >-
+      (HOLE) true
+    # Arithmetic consumption verifies that the successful result remains observably integer.
+    - >-
+      ((HOLE) 5) * 2
 
 - name: 05-order3-fun
   program: >-
     fun f . fun x . x (f x)
   oracle_migration: >-
     fun f:any. fun x:any. x (f x)
-  context: >-
-    (HOLE) (fun a . a) (fun b . true)
-  maximal_migrations:
+  contexts:
+    # The original TypeWhich witness exercises a higher-order identity flow ending in bool.
     - >-
-      fun f:(any -> any) -> any. fun x:any -> any. x (f x)
+      (HOLE) (fun a . a) (fun b . true)
+    # An integer flow through both callbacks catches ground-type over-specialization.
+    - >-
+      (HOLE) (fun a . 0) (fun b . b + 1)
+    # A boolean flow into a conditional distinguishes it from the integer instantiation.
+    - >-
+      (HOLE) (fun a . true) (fun b . if b then 8 else 9)
 
 - name: 06-order3-intfun
   program: >-
     fun f . fun g . (f g) ((g 10) + 1)
   oracle_migration: >-
     fun f:any. fun g:any. (f g) ((g 10) + 1)
-  context: >-
-    (HOLE) (fun a . fun b . true) (fun c . 0)
-  maximal_migrations:
+  contexts:
+    # The original witness observes a boolean result while exercising the required integer flow.
     - >-
-      fun f:(int -> int) -> int -> any.
-      fun g:int -> int. (f g) ((g 10) + 1)
+      (HOLE) (fun a . fun b . true) (fun c . 0)
+    # An arithmetic callback checks that intermediate and final integer contracts are preserved.
+    - >-
+      (HOLE) (fun a . fun b . b * 2) (fun c . c + 1)
+    # A higher-order result catches migrations that unnecessarily restrict the final codomain.
+    - >-
+      ((HOLE) (fun a . fun b . fun q . b + q) (fun c . 3)) 4
 
 - name: 07-double-f
   program: >-
     fun f . f (f true)
   oracle_migration: >-
     fun f:any. f (f true)
-  context: >-
-    (HOLE) (fun x . fun y . y)
-  maximal_migrations:
+  contexts:
+    # A function-valued intermediate tests higher-order reuse of the callback result.
     - >-
-      fun f:any. f (f true)
+      ((HOLE) (fun x . fun y . y)) 17
+    # A boolean endomorphism checks repeated application at the initial ground type.
+    - >-
+      (HOLE) (fun x . if x then false else true)
+    # A constant integer callback tests a different result tag on the second invocation.
+    - >-
+      ((HOLE) (fun x . 3)) + 4
+    # The original incompatible arithmetic flow must remain a cast failure.
+    - >-
+      (HOLE) (fun x . x + 1)
 
 - name: 08-outflows
   program: >-
     (fun x . x 5 + x) 5
   oracle_migration: >-
     (fun x:int. (x : any) 5 + x) 5
-  maximal_migrations:
+  contexts:
+    # The closed failure detects any annotation that changes the unavoidable bad outflow.
     - >-
-      (fun x:int. (x : any) 5 + x) 5
+      HOLE
 
 - name: 09-precision-relation
   program: >-
@@ -88,10 +135,16 @@
   oracle_migration: >-
     (fun f:any -> int. f true + (fun g:any -> int. g 5) f)
     (fun x:any. 5)
-  maximal_migrations:
+  contexts:
+    # Direct observation detects changes to the successful closed computation.
     - >-
-      (fun f:any -> int. f true + (fun g:int -> int. g 5) f)
-      (fun x:any. 5)
+      HOLE
+    # Arithmetic use confirms that the result remains available at int.
+    - >-
+      (HOLE) + 7
+    # An incompatible boolean demand ensures the result's ground tag is not weakened.
+    - >-
+      if (HOLE) then 1 else 2
 
 - name: 10-if-tag
   program: >-
@@ -99,94 +152,153 @@
   oracle_migration: >-
     fun tag:any. fun x:any.
     if tag then x + 1 else if x then 1 else 0
-  context: >-
-    (HOLE) true 1
-  maximal_migrations:
+  contexts:
+    # The arithmetic branch requires x at int when the tag selects it.
     - >-
-      fun tag:any. fun x:any.
-      if tag then x + 1 else if x then 1 else 0
+      (HOLE) true 1
+    # The alternate branch requires x at bool and observes its true case.
+    - >-
+      (HOLE) false true
+    # The false boolean case prevents a constant alternate-branch result from passing.
+    - >-
+      (HOLE) false false
+    # Selecting arithmetic with a boolean x preserves the original incompatible-use failure.
+    - >-
+      (HOLE) true true
 
 - name: 11-apply-add
   program: >-
     fun x . x (x + 1)
   oracle_migration: >-
     fun x:any. x (x + 1)
-  maximal_migrations:
+  contexts:
+    # An integer exposes the unavoidable conflict between arithmetic and function use.
     - >-
-      fun x:any -> any. x (x + 1)
+      (HOLE) 4
+    # A boolean checks that failure is preserved for a distinct ground tag.
+    - >-
+      (HOLE) true
+    # A function checks that failure is also preserved when arithmetic rejects a callable value.
+    - >-
+      (HOLE) (fun y . y)
 
 - name: 12-add-applied
   program: >-
     fun x . x ((x true) + 1)
   oracle_migration: >-
     fun x:any. x (x true + 1)
-  context: >-
-    (HOLE) (fun y . 1)
-  maximal_migrations:
+  contexts:
+    # A constant callback supplies the polymorphic-looking uses while producing a stable int.
     - >-
-      fun x:any -> int. x (x true + 1)
+      (HOLE) (fun y . 1)
+    # A different constant and arithmetic observation detect hard-coded successful results.
+    - >-
+      (HOLE) (fun y . 5) + 2
+    # Identity exposes the incompatible transition from bool to arithmetic.
+    - >-
+      (HOLE) (fun y . y)
+    # A precisely typed callback checks preservation of failure at the higher-order boundary.
+    - >-
+      (HOLE) (fun y : int . 3)
 
 - name: 13-add-two-applies
   program: >-
     fun x . x 4 + x true
   oracle_migration: >-
     fun x:any. x 4 + x true
-  context: >-
-    (HOLE) (fun y . 1)
-  maximal_migrations:
+  contexts:
+    # A constant callback witnesses successful use at both argument tags.
     - >-
-      fun x:any -> int. x 4 + x true
+      (HOLE) (fun y . 1)
+    # A distinct result with arithmetic observation detects constant-answer shortcuts.
+    - >-
+      (HOLE) (fun y . 6) * 3
+    # An int-only callback must fail when the second call supplies bool.
+    - >-
+      (HOLE) (fun y : int . 2)
+    # A bool-only callback must fail when the first call supplies int.
+    - >-
+      (HOLE) (fun y : bool . 3)
 
 - name: 14-identity-four
   program: >-
     (fun x . x) 4
   oracle_migration: >-
     (fun x:int. x) 4
-  maximal_migrations:
+  contexts:
+    # Direct observation checks the closed identity application.
     - >-
-      (fun x:int. x) 4
+      HOLE
+    # Arithmetic demand confirms preservation of the integer result.
+    - >-
+      (HOLE) * 5
+    # An incompatible boolean demand catches a changed or weakened result tag.
+    - >-
+      if (HOLE) then 1 else 0
 
 - name: 15-succ-id-id
   program: >-
     1 + ((fun y . y) ((fun x . x) true))
   oracle_migration: >-
     1 + (fun y:bool. (y : any)) ((fun x:bool. x) true)
-  maximal_migrations:
+  contexts:
+    # The unavoidable closed cast failure detects migrations that mask the bad flow.
     - >-
-      1 + (fun y:bool. (y : any)) ((fun x:bool. x) true)
+      HOLE
 
 - name: 16-identity
   program: >-
     fun x . x
   oracle_migration: >-
     fun x:any. x
-  context: >-
-    (HOLE) (fun y . y)
-  maximal_migrations:
+  contexts:
+    # An integer call rejects unsafe specialization of the identity's domain or codomain.
     - >-
-      fun x:any. x
+      (HOLE) 7
+    # A boolean call tests the same polymorphic behavior at another ground tag.
+    - >-
+      (HOLE) true
+    # A function value followed by integer use exercises higher-order identity behavior.
+    - >-
+      ((HOLE) (fun z . z)) 9
+    # Reusing that function at bool catches hidden specialization inside a function proxy.
+    - >-
+      ((HOLE) (fun z . z)) false
 
 - name: 17-apply2
   program: >-
     fun x . fun y . y x x
   oracle_migration: >-
     fun x:any. fun y:any. y x x
-  context: >-
-    (HOLE) 1 (fun z1 . fun z2 . 1)
-  maximal_migrations:
+  contexts:
+    # Integer duplication tests both argument positions and an integer-producing consumer.
     - >-
-      fun x:any. fun y:any -> any -> any. y x x
+      (HOLE) 1 (fun a . fun b . a + b)
+    # Boolean duplication detects specialization to the integer instantiation.
+    - >-
+      (HOLE) true (fun a . fun b . if a then b else false)
+    # A function-valued x probes higher-order duplication and subsequent application.
+    - >-
+      ((HOLE) (fun z . z) (fun a . fun b . a)) 6
 
 - name: 18-indirect-apply-self
   program: >-
     fun x . (fun y . x) x x
   oracle_migration: >-
     fun x:any. (fun y:any. x) x x
-  context: >-
-    (HOLE) (fun z:any. z)
-  maximal_migrations:
+  contexts:
+    # Identity supplies the self-compatible higher-order path and exposes its result.
     - >-
-      fun x:any -> any. (fun y:any -> any. x) x x
+      ((HOLE) (fun z . z)) 8
+    # A constant integer function checks a successful callable with a ground result.
+    - >-
+      (HOLE) (fun z . 3)
+    # A constant boolean function distinguishes ground codomain specialization.
+    - >-
+      (HOLE) (fun z . true)
+    # A function-producing callback checks that the result may remain higher order.
+    - >-
+      ((HOLE) (fun z . fun w . w)) false
 
 - name: 19-the-long-one
   program: >-
@@ -195,22 +307,35 @@
     fun x:any.
     (fun f:any -> int. (fun xx:any -> int. fun y:int. xx) f (f x))
     (fun z:any. 1)
-  context: >-
-    (HOLE) true 1
-  maximal_migrations:
+  contexts:
+    # Boolean input with integer consumption exercises the original witness path.
     - >-
-      fun x:any.
-      (fun f:any -> int. (fun xx:any -> int. fun y:int. xx) f (f x))
-      (fun z:any. 1)
+      (HOLE) true 1
+    # An integer input paired with bool checks that neither exposed argument is over-specialized.
+    - >-
+      (HOLE) 4 false
+    # Higher-order values at both exposed positions test preservation beyond ground tags.
+    - >-
+      (HOLE) (fun q . q) (fun r . r)
 
 - name: 20-apply-self
   program: >-
     fun x . x x
   oracle_migration: >-
     fun x:any. x x
-  maximal_migrations:
+  contexts:
+    # Identity is a self-compatible function and exposes an integer result afterward.
     - >-
-      fun x:any -> any. x x
+      ((HOLE) (fun z . z)) 4
+    # A constant integer callback checks a successful ground codomain.
+    - >-
+      (HOLE) (fun z . 5)
+    # A constant boolean callback detects codomain specialization to int.
+    - >-
+      (HOLE) (fun z . true)
+    # A function-producing callback tests a higher-order result after self-application.
+    - >-
+      ((HOLE) (fun z . fun w . w)) false
 
 - name: 21-untypable-in-sys-f
   program: >-
@@ -220,12 +345,19 @@
     (fun x:(any -> any) -> any. fun y:any.
       y (x (fun x:any. x)) (x (fun b:any. fun c:any. b)))
     (fun d:any -> any. d d)
-  maximal_migrations:
+  contexts:
+    # An integer-selecting consumer tests the first computed value at a ground codomain.
     - >-
-      (fun x:(any -> any -> any) -> any.
-        fun y:any -> any -> any.
-          y (x (fun x:any. x)) (x (fun b:any. fun c:any. b)))
-      (fun d:any -> any. d d)
+      (HOLE) (fun a . fun b . a) 7
+    # Changing only that selected ground tag detects integer specialization.
+    - >-
+      (HOLE) (fun a . fun b . a) true
+    # Selecting the other computed value and applying it exercises its higher-order shape.
+    - >-
+      (HOLE) (fun a . fun b . b) true false 9
+    # Higher-order consumption of the selected value checks function-level precision boundaries.
+    - >-
+      ((HOLE) (fun a . fun b . a)) (fun q . q)
 
 - name: 22-self-interpreter
   program: >-
@@ -240,18 +372,16 @@
       m (fun x:any. x)
         (fun m:any. fun n:any. e m (e n))
         (fun m:any. fun v:any. e (m v)))
-  maximal_migrations:
+  contexts:
+    # A variable-form encoding checks the interpreter's base dispatch without deeper recursion.
     - >-
-      (fun h:((any -> any) -> (any -> any -> any) ->
-              ((any -> any) -> any -> any) -> any) ->
-             ((any -> any) -> (any -> any -> any) ->
-              ((any -> any) -> any -> any) -> any) -> any.
-        (fun x:any -> any. h (x x))
-        (fun x:(any -> any) -> (any -> any -> any) ->
-               ((any -> any) -> any -> any) -> any. h x x))
-      (fun e:any.
-        fun m:(any -> any) -> (any -> any -> any) ->
-              ((any -> any) -> any -> any) -> any.
-          m (fun x:any. x)
-            (fun m:any. fun n:any. e m (e n))
-            (fun m:any -> any. fun v:any. e (m v)))
+      (HOLE) (fun var . fun app . fun lam . var 5)
+    # An application-form encoding exercises recursive interpretation of two terminating children.
+    - >-
+      (HOLE) (fun var . fun app . fun lam .
+        app (fun v1 . fun a1 . fun b1 . fun c1 . a1 (fun q . q))
+            (fun a2 . fun b2 . fun c2 . a2 6))
+    # A lambda-form encoding tests environment extension and application of the interpreted closure.
+    - >-
+      (HOLE) (fun var . fun app . fun lam .
+        lam (fun v . fun a . fun b . fun c . a v) 9)

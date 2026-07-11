@@ -4,21 +4,15 @@ calculus.
 ## What Is Provided
 
 The language, including its syntax, type system, and precision relation, is
-documented in `/app/Language.md`.
+documented in `/app/Language.md`. A reference implementation, along with its
+source code, is compiled and ready to run at `/app/gtlc/_build/default/gtlc.exe`.
 
-A reference implementation is compiled and ready to run at
-`/app/gtlc/_build/default/gtlc.exe`. It provides two subcommands:
+- Use `gtlc.exe exec FILE.gtlc` to run a program.
 
-```bash
-/app/gtlc/_build/default/gtlc.exe exec FILE.gtlc
-/app/gtlc/_build/default/gtlc.exe is-migration ORIGINAL.gtlc MIGRATED.gtlc
-```
-
-Run the executable or either subcommand with `--help` for its complete
-interface. Both commands type-check their input programs before doing
-anything else and raise an error if a program is not well typed. `exec`
-evaluates a closed program without a fuel limit. `is-migration` checks the
-pointwise syntactic precision relation and prints a Boolean.
+- Use `gtlc.exe is-migration ORIGINAL.gtlc MIGRATED.gtlc` to check if
+  `MIGRATED.gtlc` has syntactically more precise type annotations than
+  `ORIGINAL.gtlc`. This is a syntactic check only. Making types
+   more precise can change the behavior of a program as described below.
 
 The environment has Python, OCaml, Rust, and Z3 installed. You can write
 code in any programming language available in the environment.
