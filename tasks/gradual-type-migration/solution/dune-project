@@ -1,3 +1,0 @@
-(lang dune 3.10)
-(name gradual_type_migration_reference)
-(generate_opam_files false)

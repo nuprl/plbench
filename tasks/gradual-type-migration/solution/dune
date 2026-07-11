@@ -1,5 +1,0 @@
-(executable
- (name reference)
- (libraries str yaml)
- (preprocess
-  (pps ppx_deriving_yaml)))

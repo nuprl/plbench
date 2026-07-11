@@ -1,6 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-eval "$(opam env --switch=system)"
-dune build --root /solution
-install -m 755 /solution/_build/default/reference.exe /app/migrate
+cargo build --locked --release --manifest-path /solution/typewhich/Cargo.toml
+install -m 755 /solution/typewhich/target/release/typeinf-playground /app/typewhich
+install -m 755 /solution/migrate /app/migrate

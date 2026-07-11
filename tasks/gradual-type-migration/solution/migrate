@@ -1,0 +1,28 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 FILE.gtlc" >&2
+  exit 2
+fi
+
+input=$1
+output=$(mktemp --suffix=.gtlc)
+trap 'rm -f "$output"' EXIT
+
+/app/typewhich migrate --rigid-vars "$input" >"$output"
+
+if ! /app/gtlc/_build/default/gtlc.exe type-check "$output"; then
+  echo "TypeWhich printed a migration that does not type-check" >&2
+  exit 1
+fi
+
+relation=$(
+  /app/gtlc/_build/default/gtlc.exe is-migration "$input" "$output"
+)
+if [[ $relation != true ]]; then
+  echo "TypeWhich output is not a syntactic migration" >&2
+  exit 1
+fi
+
+cat "$output"
