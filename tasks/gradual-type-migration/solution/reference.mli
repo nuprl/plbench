@@ -1,4 +1,4 @@
-(** Static reference migrator for Harbor's trusted oracle submission.
+(** Static reproduction of default TypeWhich for Harbor's oracle submission.
 
-    The executable selects a curated maximal migration from the verifier's
-    human-authored benchmark document. *)
+    The executable returns TypeWhich's recorded migration for each benchmark; it
+    is intentionally an imperfect precision baseline. *)

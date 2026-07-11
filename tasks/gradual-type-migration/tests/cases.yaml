@@ -1,6 +1,8 @@
 - name: 01-farg-mismatch
   program: >-
     (fun f . f true) (fun x . x + 100)
+  oracle_migration: >-
+    (fun f:bool -> int. f true) (fun x:bool. (x : any) + 100)
   maximal_migrations:
     - >-
       (fun f:bool -> int. f true) (fun x:bool. (x : any) + 100)
@@ -8,6 +10,8 @@
 - name: 02-rank2-poly-id
   program: >-
     (fun i . (fun a . i true) (i 5)) (fun x . x)
+  oracle_migration: >-
+    (fun i:any -> any. (fun a:any. i true) (i 5)) (fun x:any. x)
   maximal_migrations:
     - >-
       (fun i:any -> any. (fun a:any. i true) (i 5)) (fun x:any. x)
@@ -16,6 +20,10 @@
   program: >-
     (fun b . b (fun c . ((fun x . x x) 5) 5) (fun d . 0))
     (fun t . fun f . f)
+  oracle_migration: >-
+    (fun b:(any -> any) -> (any -> int) -> any -> int.
+      b (fun c:any. (fun x:any. x x) 5 5) (fun d:any. 0))
+    (fun t:any -> any. fun f:any -> int. f)
   maximal_migrations:
     - >-
       (fun b:(any -> any) -> (any -> int) -> any -> int.
@@ -25,6 +33,8 @@
 - name: 04-f-in-f-out
   program: >-
     (fun f . (fun y . f) (f 5)) (fun x . 10 + x)
+  oracle_migration: >-
+    (fun f:any -> int. (fun y:int. f) (f 5)) (fun x:any. 10 + x)
   maximal_migrations:
     - >-
       (fun f:int -> int. (fun y:int. f) (f 5)) (fun x:int. 10 + x)
@@ -32,6 +42,8 @@
 - name: 05-order3-fun
   program: >-
     fun f . fun x . x (f x)
+  oracle_migration: >-
+    fun f:any. fun x:any. x (f x)
   context: >-
     (HOLE) (fun a . a) (fun b . true)
   maximal_migrations:
@@ -41,6 +53,8 @@
 - name: 06-order3-intfun
   program: >-
     fun f . fun g . (f g) ((g 10) + 1)
+  oracle_migration: >-
+    fun f:any. fun g:any. (f g) ((g 10) + 1)
   context: >-
     (HOLE) (fun a . fun b . true) (fun c . 0)
   maximal_migrations:
@@ -51,6 +65,8 @@
 - name: 07-double-f
   program: >-
     fun f . f (f true)
+  oracle_migration: >-
+    fun f:any. f (f true)
   context: >-
     (HOLE) (fun x . fun y . y)
   maximal_migrations:
@@ -60,6 +76,8 @@
 - name: 08-outflows
   program: >-
     (fun x . x 5 + x) 5
+  oracle_migration: >-
+    (fun x:int. (x : any) 5 + x) 5
   maximal_migrations:
     - >-
       (fun x:int. (x : any) 5 + x) 5
@@ -67,6 +85,9 @@
 - name: 09-precision-relation
   program: >-
     (fun f . f true + (fun g . g 5) f) (fun x . 5)
+  oracle_migration: >-
+    (fun f:any -> int. f true + (fun g:any -> int. g 5) f)
+    (fun x:any. 5)
   maximal_migrations:
     - >-
       (fun f:any -> int. f true + (fun g:int -> int. g 5) f)
@@ -75,6 +96,9 @@
 - name: 10-if-tag
   program: >-
     fun tag . fun x . if tag then x + 1 else if x then 1 else 0
+  oracle_migration: >-
+    fun tag:any. fun x:any.
+    if tag then x + 1 else if x then 1 else 0
   context: >-
     (HOLE) true 1
   maximal_migrations:
@@ -85,6 +109,8 @@
 - name: 11-apply-add
   program: >-
     fun x . x (x + 1)
+  oracle_migration: >-
+    fun x:any. x (x + 1)
   maximal_migrations:
     - >-
       fun x:any -> any. x (x + 1)
@@ -92,6 +118,8 @@
 - name: 12-add-applied
   program: >-
     fun x . x ((x true) + 1)
+  oracle_migration: >-
+    fun x:any. x (x true + 1)
   context: >-
     (HOLE) (fun y . 1)
   maximal_migrations:
@@ -101,6 +129,8 @@
 - name: 13-add-two-applies
   program: >-
     fun x . x 4 + x true
+  oracle_migration: >-
+    fun x:any. x 4 + x true
   context: >-
     (HOLE) (fun y . 1)
   maximal_migrations:
@@ -110,6 +140,8 @@
 - name: 14-identity-four
   program: >-
     (fun x . x) 4
+  oracle_migration: >-
+    (fun x:int. x) 4
   maximal_migrations:
     - >-
       (fun x:int. x) 4
@@ -117,6 +149,8 @@
 - name: 15-succ-id-id
   program: >-
     1 + ((fun y . y) ((fun x . x) true))
+  oracle_migration: >-
+    1 + (fun y:bool. (y : any)) ((fun x:bool. x) true)
   maximal_migrations:
     - >-
       1 + (fun y:bool. (y : any)) ((fun x:bool. x) true)
@@ -124,6 +158,8 @@
 - name: 16-identity
   program: >-
     fun x . x
+  oracle_migration: >-
+    fun x:any. x
   context: >-
     (HOLE) (fun y . y)
   maximal_migrations:
@@ -133,6 +169,8 @@
 - name: 17-apply2
   program: >-
     fun x . fun y . y x x
+  oracle_migration: >-
+    fun x:any. fun y:any. y x x
   context: >-
     (HOLE) 1 (fun z1 . fun z2 . 1)
   maximal_migrations:
@@ -142,6 +180,8 @@
 - name: 18-indirect-apply-self
   program: >-
     fun x . (fun y . x) x x
+  oracle_migration: >-
+    fun x:any. (fun y:any. x) x x
   context: >-
     (HOLE) (fun z:any. z)
   maximal_migrations:
@@ -151,6 +191,10 @@
 - name: 19-the-long-one
   program: >-
     fun x . (fun f . (fun xx . fun y . xx) f (f x)) (fun z . 1)
+  oracle_migration: >-
+    fun x:any.
+    (fun f:any -> int. (fun xx:any -> int. fun y:int. xx) f (f x))
+    (fun z:any. 1)
   context: >-
     (HOLE) true 1
   maximal_migrations:
@@ -162,6 +206,8 @@
 - name: 20-apply-self
   program: >-
     fun x . x x
+  oracle_migration: >-
+    fun x:any. x x
   maximal_migrations:
     - >-
       fun x:any -> any. x x
@@ -170,6 +216,10 @@
   program: >-
     (fun x . fun y . y (x (fun x . x)) (x (fun b . fun c . b)))
     (fun d . d d)
+  oracle_migration: >-
+    (fun x:(any -> any) -> any. fun y:any.
+      y (x (fun x:any. x)) (x (fun b:any. fun c:any. b)))
+    (fun d:any -> any. d d)
   maximal_migrations:
     - >-
       (fun x:(any -> any -> any) -> any.
@@ -183,6 +233,13 @@
     (fun e . fun m . m (fun x . x)
       (fun m . fun n . (e m) (e n))
       (fun m . fun v . e (m v)))
+  oracle_migration: >-
+    (fun h:any -> any -> any.
+      (fun x:any -> any. h (x x)) (fun x:any. h x x))
+    (fun e:any. fun m:any.
+      m (fun x:any. x)
+        (fun m:any. fun n:any. e m (e n))
+        (fun m:any. fun v:any. e (m v)))
   maximal_migrations:
     - >-
       (fun h:((any -> any) -> (any -> any -> any) ->

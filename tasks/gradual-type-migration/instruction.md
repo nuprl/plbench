@@ -27,3 +27,6 @@ The migrated program must:
    divergence in every well-typed context that receives the program at type
    `any`; and
 6. subject to compatibility, make the annotations as precise as possible.
+
+Compatibility takes priority over precision: produce a maximally precise
+compatible migration, or any maximal one if several are incomparable.

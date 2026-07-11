@@ -1,6 +1,7 @@
 type benchmark = {
   name : string;
   program : string;
+  oracle_migration : string;
   context : string option; [@default None]
   maximal_migrations : string list;
 }
@@ -36,8 +37,7 @@ let find_benchmark program =
 
 let migrate path =
   match find_benchmark (read_file path) with
-  | Some { maximal_migrations = migration :: _; _ } -> print_endline migration
-  | Some _ -> failwith "benchmark has no maximal migration"
+  | Some benchmark -> print_endline benchmark.oracle_migration
   | None -> failwith "input is not a reference benchmark"
 
 let () =

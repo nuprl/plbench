@@ -1,6 +1,7 @@
 type case = {
   name : string;
   program : string;
+  oracle_migration : string;
   context : string option; [@default None]
   maximal_migrations : string list;
 }
