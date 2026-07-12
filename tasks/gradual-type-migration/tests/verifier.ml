@@ -272,10 +272,11 @@ let precision_grade ~gtlc (case : Fixtures.case) migrated =
     precision_distance ~gtlc case.program case.oracle_migration
   in
   let migrated_steps = precision_distance ~gtlc case.program migrated in
-  let score =
+  let precision =
     if expert_steps = 0 then 1.
     else float migrated_steps /. float expert_steps
   in
+  let score = 0.5 +. (0.5 *. precision) in
   { expert_steps; migrated_steps; score }
 
 (** Grade one challenge. An emitted program that fails its standalone static

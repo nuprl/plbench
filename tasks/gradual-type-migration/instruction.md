@@ -66,6 +66,12 @@ Every program emitted by the migration tool must parse and type-check on its
 own. If any emitted program fails this requirement, the reward for the entire
 run is zero, rather than only the reward for that input.
 
+Each input gives equal weight to compatibility and precision. A migration that
+passes the syntactic and behavioral checks receives half credit, plus half
+credit multiplied by the fraction of the expert migration's precision steps
+that it achieves. A migration that fails either check receives no credit for
+that input.
+
 The objective is to output the *most precise migration possible that is still
 behaviorally equivalent.* I have a hidden suite of tests where I know the most
 precise migration possible (deduced by reasoning through the program by hand).

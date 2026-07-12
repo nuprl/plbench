@@ -45,5 +45,11 @@ one in several steps. If M is the candidate migration of C, we check that:
    verifier error: either E is not maximal or the behavioral tests are not
    strong enough.
 
+Each challenge gives equal weight to correctness and precision. A migration
+that passes the syntactic and behavioral checks receives one half point plus
+one half times its precision fraction. A failing migration receives zero:
+
+`0.5 + 0.5 * distance(C, M) / distance(C, E)`
+
 As a sanity check, we run (1) and (2) on the expert-vetted migrations
 before checking any candidate and abort with a verifier error if they fail.
