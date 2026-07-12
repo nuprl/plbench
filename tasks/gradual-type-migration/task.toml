@@ -12,6 +12,7 @@ email = "a.guha@northeastern.edu"
 [metadata]
 category = "programming-languages"
 difficulty = "hard"
+vetted = true
 
 [verifier]
 timeout_sec = 900.0
