@@ -352,6 +352,11 @@
   oracle_migration: >-
     fun x:any -> any. x x
   contexts:
+    # Identity returns itself from the self-application. Applying that result
+    # to an integer rejects a migration that over-specializes x's domain.
+    - source: >-
+        (((HOLE : any)) (fun z . z)) 7
+      expected: "7"
     # A constant integer callback checks a successful ground codomain.
     - source: >-
         ((HOLE : any)) (fun z . 5)
