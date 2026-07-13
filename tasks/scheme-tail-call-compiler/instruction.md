@@ -23,7 +23,7 @@ The reference interpreter normally implements proper tail calls. It also has
 an optional stack-depth limit:
 
 ```bash
-/app/minischeme --max-stack-depth 50 -l program.scm
+/app/minischeme --max-stack-depth 10 -l program.scm
 ```
 
 When `--max-stack-depth N` is present, nested evaluation, including calls in
@@ -37,32 +37,25 @@ your compiler in any language.
 
 ## What You Must Build
 
-Write an executable MiniScheme-to-MiniScheme compiler with exactly this
-command-line interface:
+Write an executable MiniScheme-to-MiniScheme compiler that implements proper
+tail calls. It must have exactly this CLI:
 
 ```bash
 /app/compiler INPUT.scm OUTPUT.scm
 ```
 
-`INPUT.scm` is a complete, valid MiniScheme program. On success, your compiler
-must write a complete MiniScheme program to `OUTPUT.scm` and exit with status
-0. If compilation fails, it must exit nonzero. The output program must have
-the same observable behavior as the input program: the same bytes on standard
-output, the same evaluation order and effects, and the same successful result
-or runtime failure.
+Your compiler must write a complete MiniScheme program to `OUTPUT.scm` and exit
+with status 0. If compilation fails, it must exit nonzero. The output program
+must have the same observable behavior as the input program: the same bytes on
+standard output, the same evaluation order and effects, and the same successful
+result or runtime failure.
 
-Most importantly, tail-recursive source programs must continue to work when
-the compiled output runs with a stack limit of 50, even when the corresponding
-uncompiled program would exceed that limit:
+We will run the output with a stack limit of 10:
 
 ```bash
 /app/compiler INPUT.scm OUTPUT.scm
-/app/minischeme --max-stack-depth 50 -l OUTPUT.scm
+/app/minischeme --max-stack-depth 10 -l OUTPUT.scm
 ```
 
-We will first run every source program on `/app/minischeme` without a stack
-limit as a semantics sanity check. We will then compile it using the interface
-above, run the compiled program with `--max-stack-depth 50`, and compare the
-behaviors. Tests include long direct tail recursion, mutual recursion such as
-`even?`/`odd?` on inputs greater than 100, tail calls through higher-order
-functions, and ordinary non-recursive language features.
+The output program should work even if the input would have blown the stack with
+that limit.

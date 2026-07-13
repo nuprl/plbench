@@ -14,7 +14,7 @@ MINISCHEME = Path("/app/minischeme")
 COMPILER = Path("/app/compiler")
 PROGRAMS = Path("/tests/programs")
 REWARD = Path("/logs/verifier/reward.txt")
-STACK_LIMIT = "50"
+STACK_LIMIT = "10"
 
 
 @dataclass
@@ -94,7 +94,7 @@ def grade_program(program: Path, expected: Run, directory: Path) -> tuple[float,
         return 0.0, f"stdout mismatch: expected {expected.stdout!r}, got {actual.stdout!r}"
     if not expected_success and expected.stderr != actual.stderr:
         return 0.0, f"runtime-error mismatch: expected {expected.stderr!r}, got {actual.stderr!r}"
-    return 1.0, "behavior matches at depth 50"
+    return 1.0, f"behavior matches at depth {STACK_LIMIT}"
 
 
 def main() -> int:
