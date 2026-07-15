@@ -23,7 +23,7 @@ ensure that loads, stores, pointer derivation, and libc wrappers produce the
 correct values rather than merely avoiding a trap.
 
 The corpus covers integer and floating-point accesses, global and automatic
-objects, heap graphs, static pointer initializers,
+objects, heap graphs, function pointers, static pointer initializers,
 subobject bounds, bulk and string operations, pointer-representation attacks,
 integer overflow during pointer scaling, and reachability-only heap lifetime.
 

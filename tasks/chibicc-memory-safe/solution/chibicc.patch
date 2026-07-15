@@ -12,7 +12,7 @@ index f73eeec033e448b3c5d60bac783ca9538f80a9ff..0fd7699a50a3ee16ee440fd0d794d7ce
  
  // AST node
 diff --git a/codegen.c b/codegen.c
-index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2ca83524fb 100644
+index da11fd72b5682d679bed07a4610cb5423aa05ec8..e75af6adc6abb16c21bc3e9fe895bd292115f36c 100644
 --- a/codegen.c
 +++ b/codegen.c
 @@ -50,6 +50,52 @@ static void popf(int reg) {
@@ -315,7 +315,18 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      return;
    case ND_ASSIGN:
      gen_addr(node->lhs);
-@@ -982,6 +1122,19 @@ static void gen_expr(Node *node) {
+@@ -883,6 +1023,10 @@ static void gen_expr(Node *node) {
+ 
+     int stack_args = push_args(node);
+     gen_expr(node->lhs);
++    if (node->lhs->ty->kind == TY_PTR) {
++      println("  mov %%rax, %%rdi");
++      safe_call("__safe_resolve_function");
++    }
+ 
+     int gp = 0, fp = 0;
+ 
+@@ -982,6 +1126,19 @@ static void gen_expr(Node *node) {
      pop("%rdi"); // addr
  
      int sz = node->cas_addr->ty->base->size;
@@ -335,7 +346,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      println("  lock cmpxchg %s, (%%rdi)", reg_dx(sz));
      println("  sete %%cl");
      println("  je 1f");
-@@ -997,6 +1150,11 @@ static void gen_expr(Node *node) {
+@@ -997,6 +1154,11 @@ static void gen_expr(Node *node) {
      pop("%rdi");
  
      int sz = node->lhs->ty->base->size;
@@ -347,7 +358,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      println("  xchg %s, (%%rdi)", reg_ax(sz));
      return;
    }
-@@ -1112,16 +1270,76 @@ static void gen_expr(Node *node) {
+@@ -1112,16 +1274,76 @@ static void gen_expr(Node *node) {
  
    switch (node->kind) {
    case ND_ADD:
@@ -425,7 +436,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      if (node->ty->is_unsigned) {
        println("  mov $0, %s", dx);
        println("  div %s", di);
-@@ -1149,6 +1367,14 @@ static void gen_expr(Node *node) {
+@@ -1149,6 +1371,14 @@ static void gen_expr(Node *node) {
    case ND_NE:
    case ND_LT:
    case ND_LE:
@@ -440,7 +451,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      println("  cmp %s, %s", di, ax);
  
      if (node->kind == ND_EQ) {
-@@ -1432,6 +1658,42 @@ static void emit_data(Obj *prog) {
+@@ -1432,6 +1662,49 @@ static void emit_data(Obj *prog) {
    }
  }
  
@@ -453,6 +464,13 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
 +  println(".L.safe_globals_init:");
 +  println("  push %%rbp");
 +  println("  mov %%rsp, %%rbp");
++
++  for (Obj *var = prog; var; var = var->next) {
++    if (!var->is_function || !var->is_definition || !var->is_live)
++      continue;
++    println("  lea %s(%%rip), %%rdi", var->name);
++    println("  call __safe_register_function@PLT");
++  }
 +
 +  for (Obj *var = prog; var; var = var->next) {
 +    if (var->is_function || !var->is_definition || var->is_tls || var->ty->size <= 0)
@@ -483,7 +501,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
  static void store_fp(int r, int offset, int sz) {
    switch (sz) {
    case 4:
-@@ -1564,6 +1826,24 @@ static void emit_text(Obj *prog) {
+@@ -1564,6 +1837,24 @@ static void emit_text(Obj *prog) {
      }
  
      // Emit code
@@ -508,7 +526,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      gen_stmt(fn->body);
      assert(depth == 0);
  
-@@ -1576,6 +1856,16 @@ static void emit_text(Obj *prog) {
+@@ -1576,6 +1867,16 @@ static void emit_text(Obj *prog) {
  
      // Epilogue
      println(".L.return.%s:", fn->name);
@@ -525,7 +543,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
      println("  mov %%rbp, %%rsp");
      println("  pop %%rbp");
      println("  ret");
-@@ -1591,5 +1881,6 @@ void codegen(Obj *prog, FILE *out) {
+@@ -1591,5 +1892,6 @@ void codegen(Obj *prog, FILE *out) {
  
    assign_lvar_offsets(prog);
    emit_data(prog);
@@ -533,7 +551,7 @@ index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2c
    emit_text(prog);
  }
 diff --git a/parse.c b/parse.c
-index 6acaeb8cf1ad615321b24adc017331d756725780..b627f1a596e83993be9f6ac1f7d835eb28f5d216 100644
+index 6acaeb8cf1ad615321b24adc017331d756725780..75a2a007f4099a7ff5d0ac1e86865c8a1177fbd8 100644
 --- a/parse.c
 +++ b/parse.c
 @@ -1400,6 +1400,43 @@ static uint64_t read_buf(char *buf, int sz) {
@@ -649,15 +667,13 @@ index 6acaeb8cf1ad615321b24adc017331d756725780..b627f1a596e83993be9f6ac1f7d835eb
  static Node *funcall(Token **rest, Token *tok, Node *fn) {
    add_type(fn);
  
-@@ -2879,6 +2923,13 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
+@@ -2879,6 +2923,11 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
        (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
      error_tok(fn->tok, "not a function");
  
-+  if (fn->ty->kind == TY_PTR)
-+    error_tok(fn->tok, "indirect function calls are outside the safe subset");
-+
-+  if (fn->kind != ND_VAR ||
-+      (!fn->var->is_definition && !is_safe_runtime_function(fn->var->name)))
++  if (fn->ty->kind == TY_FUNC &&
++      (fn->kind != ND_VAR ||
++       (!fn->var->is_definition && !is_safe_runtime_function(fn->var->name))))
 +    error_tok(fn->tok, "call to a function without a checked runtime contract");
 +
    Type *ty = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;

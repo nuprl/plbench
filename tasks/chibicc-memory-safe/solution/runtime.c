@@ -14,6 +14,7 @@ typedef enum { OBJ_GLOBAL, OBJ_STACK, OBJ_HEAP } ObjectKind;
 
 typedef struct Object Object;
 typedef struct Capability Capability;
+typedef struct FunctionTarget FunctionTarget;
 
 struct Object {
   Object *next;
@@ -35,8 +36,14 @@ struct Capability {
   uintptr_t cursor;
 };
 
+struct FunctionTarget {
+  FunctionTarget *next;
+  void *address;
+};
+
 static Object *objects;
 static Capability *capabilities;
+static FunctionTarget *function_targets;
 static uint64_t next_object_id = 1;
 static size_t live_heap_bytes;
 static Object *temporary_heap_root;
@@ -55,6 +62,25 @@ static void fail(const char *message, const void *pointer) {
 
 static int is_token(const void *pointer) {
   return capability_tag && (((uintptr_t)pointer) & CAP_MASK) == capability_tag;
+}
+
+void __safe_register_function(void *address) {
+  for (FunctionTarget *target = function_targets; target; target = target->next)
+    if (target->address == address)
+      return;
+  FunctionTarget *target = malloc(sizeof(*target));
+  if (!target)
+    fail("function registry allocation failed", address);
+  target->address = address;
+  target->next = function_targets;
+  function_targets = target;
+}
+
+void *__safe_resolve_function(void *address) {
+  for (FunctionTarget *target = function_targets; target; target = target->next)
+    if (target->address == address)
+      return address;
+  fail("indirect call through an invalid function pointer", address);
 }
 
 void __safe_integer_overflow(void) {

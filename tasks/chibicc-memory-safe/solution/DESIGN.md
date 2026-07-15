@@ -18,6 +18,10 @@ a no-op. `realloc` creates a separate allocation and leaves the old allocation
 valid so aliases cannot dangle. Memory and string wrappers validate complete
 operand ranges before calling libc on resolved native addresses.
 
+Defined functions are registered before `main`. Indirect calls resolve their
+target through that registry, allowing function pointers to be stored, passed,
+and called without permitting arbitrary data to become a control-flow target.
+
 The runtime uses mark-and-sweep collection at a 32 MiB allocation threshold
 and exposes `__safe_collect` for synchronous forced collection. Registered
 globals and the active native stack are scanned for exact issued capability tokens; marked
@@ -28,6 +32,6 @@ deliberately reused, and are accepted only through exact live metadata, so
 reclamation cannot revive stale authority when libc reuses a native address.
 
 This correctness-first oracle uses a deliberately closed, single-threaded
-x86-64 Linux interface. Unchecked foreign calls, indirect calls, computed
-gotos, inline assembly, and setjmp/longjmp variants are rejected rather than
-allowed to bypass the safety boundary.
+x86-64 Linux interface. Unchecked foreign calls, computed gotos, inline
+assembly, and setjmp/longjmp variants are rejected rather than allowed to
+bypass the safety boundary.
