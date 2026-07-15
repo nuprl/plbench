@@ -1,0 +1,1 @@
+calloc-memmove: zero=1 data=10,10,20,30,40

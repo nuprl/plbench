@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$root/chibicc/chibicc" \
+  -Dmalloc=__safe_malloc \
+  -Dcalloc=__safe_calloc \
+  -Drealloc=__safe_realloc \
+  -Dfree=__safe_free \
+  -Dmemcpy=__safe_memcpy \
+  -Dmemmove=__safe_memmove \
+  -Dmemset=__safe_memset \
+  -Dstrlen=__safe_strlen \
+  -Dstrcpy=__safe_strcpy \
+  -Dprintf=__safe_printf \
+  "$@" "$root/runtime.o"

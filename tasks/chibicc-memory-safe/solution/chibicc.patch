@@ -1,0 +1,686 @@
+diff --git a/chibicc.h b/chibicc.h
+index f73eeec033e448b3c5d60bac783ca9538f80a9ff..0fd7699a50a3ee16ee440fd0d794d7ce9b417e5d 100644
+--- a/chibicc.h
++++ b/chibicc.h
+@@ -170,6 +170,8 @@ struct Relocation {
+   int offset;
+   char **label;
+   long addend;
++  long lower_addend;
++  size_t bound_size;
+ };
+ 
+ // AST node
+diff --git a/codegen.c b/codegen.c
+index da11fd72b5682d679bed07a4610cb5423aa05ec8..99579413c3825d2d41cc5fe6db462a2ca83524fb 100644
+--- a/codegen.c
++++ b/codegen.c
+@@ -50,6 +50,52 @@ static void popf(int reg) {
+   depth--;
+ }
+ 
++// Calls inserted by the capability instrumentation obey the SysV stack
++// alignment rule while preserving chibicc's expression-stack accounting.
++static void safe_call(char *name) {
++  if (depth % 2) {
++    println("  sub $8, %%rsp");
++    println("  call %s@PLT", name);
++    println("  add $8, %%rsp");
++  } else {
++    println("  call %s@PLT", name);
++  }
++}
++
++// Convert a raw compiler-generated object address or an existing capability
++// into a capability narrowed to `ty`.
++static void narrow(Type *ty) {
++  println("  mov %%rax, %%rdi");
++  if (ty->kind == TY_VLA)
++    println("  mov %d(%%rbp), %%rsi", ty->vla_size->offset);
++  else
++    println("  mov $%d, %%rsi", ty->size);
++  safe_call("__safe_narrow");
++}
++
++// Introduce authority for an address produced directly by the compiler for a
++// declared object. User-produced pointer values never use this entry point.
++static void from_raw(Type *ty) {
++  println("  mov %%rax, %%rdi");
++  if (ty->kind == TY_VLA)
++    println("  mov %d(%%rbp), %%rsi", ty->vla_size->offset);
++  else
++    println("  mov $%d, %%rsi", ty->size);
++  safe_call("__safe_from_raw");
++}
++
++static void from_raw_global(Type *ty) {
++  println("  mov %%rax, %%rdi");
++  println("  mov $%d, %%rsi", ty->size);
++  safe_call("__safe_from_raw_global");
++}
++
++static void resolve_access(int size) {
++  println("  mov %%rax, %%rdi");
++  println("  mov $%d, %%rsi", size);
++  safe_call("__safe_access");
++}
++
+ // Round up `n` to the nearest multiple of `align`. For instance,
+ // align_to(5, 8) returns 8 and align_to(11, 8) returns 16.
+ int align_to(int n, int align) {
+@@ -84,12 +130,14 @@ static void gen_addr(Node *node) {
+     // Variable-length array, which is always local.
+     if (node->var->ty->kind == TY_VLA) {
+       println("  mov %d(%%rbp), %%rax", node->var->offset);
++      from_raw(node->var->ty);
+       return;
+     }
+ 
+     // Local variable
+     if (node->var->is_local) {
+       println("  lea %d(%%rbp), %%rax", node->var->offset);
++      from_raw(node->var->ty);
+       return;
+     }
+ 
+@@ -100,11 +148,14 @@ static void gen_addr(Node *node) {
+         println("  .value 0x6666");
+         println("  rex64");
+         println("  call __tls_get_addr@PLT");
++        from_raw_global(node->var->ty);
+         return;
+       }
+ 
+       // Function or global variable
+       println("  mov %s@GOTPCREL(%%rip), %%rax", node->var->name);
++      if (node->ty->kind != TY_FUNC)
++        from_raw_global(node->var->ty);
+       return;
+     }
+ 
+@@ -112,6 +163,7 @@ static void gen_addr(Node *node) {
+     if (node->var->is_tls) {
+       println("  mov %%fs:0, %%rax");
+       println("  add $%s@tpoff, %%rax", node->var->name);
++      from_raw_global(node->var->ty);
+       return;
+     }
+ 
+@@ -149,6 +201,7 @@ static void gen_addr(Node *node) {
+ 
+     // Global variable
+     println("  lea %s(%%rip), %%rax", node->var->name);
++    from_raw_global(node->var->ty);
+     return;
+   case ND_DEREF:
+     gen_expr(node->lhs);
+@@ -159,7 +212,10 @@ static void gen_addr(Node *node) {
+     return;
+   case ND_MEMBER:
+     gen_addr(node->lhs);
+-    println("  add $%d, %%rax", node->member->offset);
++    println("  mov %%rax, %%rdi");
++    println("  mov $%d, %%rsi", node->member->offset);
++    println("  mov $0, %%edx");
++    safe_call("__safe_add");
+     return;
+   case ND_FUNCALL:
+     if (node->ret_buffer) {
+@@ -176,6 +232,9 @@ static void gen_addr(Node *node) {
+     break;
+   case ND_VLA_PTR:
+     println("  lea %d(%%rbp), %%rax", node->var->offset);
++    println("  mov %%rax, %%rdi");
++    println("  mov $8, %%rsi");
++    safe_call("__safe_from_raw");
+     return;
+   }
+ 
+@@ -198,16 +257,21 @@ static void load(Type *ty) {
+     // the first element of the array in C" occurs.
+     return;
+   case TY_FLOAT:
++    resolve_access(ty->size);
+     println("  movss (%%rax), %%xmm0");
+     return;
+   case TY_DOUBLE:
++    resolve_access(ty->size);
+     println("  movsd (%%rax), %%xmm0");
+     return;
+   case TY_LDOUBLE:
++    resolve_access(ty->size);
+     println("  fldt (%%rax)");
+     return;
+   }
+ 
++  resolve_access(ty->size);
++
+   char *insn = ty->is_unsigned ? "movz" : "movs";
+ 
+   // When we load a char or a short value to a register, we always
+@@ -232,22 +296,69 @@ static void store(Type *ty) {
+   switch (ty->kind) {
+   case TY_STRUCT:
+   case TY_UNION:
++    println("  push %%rdi");
++    depth++;
++    resolve_access(ty->size);
++    println("  push %%rax");
++    depth++;
++    println("  mov 8(%%rsp), %%rdi");
++    println("  mov $%d, %%rsi", ty->size);
++    safe_call("__safe_access");
++    println("  mov %%rax, %%rdi");
++    println("  pop %%rax");
++    println("  add $8, %%rsp");
++    depth -= 2;
+     for (int i = 0; i < ty->size; i++) {
+       println("  mov %d(%%rax), %%r8b", i);
+       println("  mov %%r8b, %d(%%rdi)", i);
+     }
+     return;
+   case TY_FLOAT:
++    println("  sub $8, %%rsp");
++    println("  movss %%xmm0, (%%rsp)");
++    depth++;
++    println("  mov %%rdi, %%rax");
++    resolve_access(ty->size);
++    println("  mov %%rax, %%rdi");
++    println("  movss (%%rsp), %%xmm0");
++    println("  add $8, %%rsp");
++    depth--;
+     println("  movss %%xmm0, (%%rdi)");
+     return;
+   case TY_DOUBLE:
++    println("  sub $8, %%rsp");
++    println("  movsd %%xmm0, (%%rsp)");
++    depth++;
++    println("  mov %%rdi, %%rax");
++    resolve_access(ty->size);
++    println("  mov %%rax, %%rdi");
++    println("  movsd (%%rsp), %%xmm0");
++    println("  add $8, %%rsp");
++    depth--;
+     println("  movsd %%xmm0, (%%rdi)");
+     return;
+   case TY_LDOUBLE:
++    println("  sub $16, %%rsp");
++    println("  fstpt (%%rsp)");
++    depth += 2;
++    println("  mov %%rdi, %%rax");
++    resolve_access(ty->size);
++    println("  mov %%rax, %%rdi");
++    println("  fldt (%%rsp)");
++    println("  add $16, %%rsp");
++    depth -= 2;
+     println("  fstpt (%%rdi)");
+     return;
+   }
+ 
++  println("  push %%rax");
++  depth++;
++  println("  mov %%rdi, %%rax");
++  resolve_access(ty->size);
++  println("  mov %%rax, %%rdi");
++  println("  pop %%rax");
++  depth--;
++
+   if (ty->size == 1)
+     println("  mov %%al, (%%rdi)");
+   else if (ty->size == 2)
+@@ -398,6 +509,15 @@ static void cast(Type *from, Type *to) {
+     return;
+   }
+ 
++  if (from->kind == TY_PTR && is_integer(to)) {
++    println("  mov %%rax, %%rdi");
++    safe_call("__safe_pointer_to_integer");
++  } else if (is_integer(from) && to->kind == TY_PTR) {
++    println("  mov %%rax, %%rdi");
++    safe_call("__safe_integer_to_pointer");
++    return;
++  }
++
+   int t1 = getTypeId(from);
+   int t2 = getTypeId(to);
+   if (cast_table[t1][t2])
+@@ -443,6 +563,7 @@ static bool has_flonum2(Type *ty) {
+ }
+ 
+ static void push_struct(Type *ty) {
++  resolve_access(ty->size);
+   int sz = align_to(ty->size, 8);
+   println("  sub $%d, %%rsp", sz);
+   depth += sz / 8;
+@@ -564,6 +685,7 @@ static int push_args(Node *node) {
+   // a pointer to a buffer as if it were the first argument.
+   if (node->ret_buffer && node->ty->size > 16) {
+     println("  lea %d(%%rbp), %%rax", node->ret_buffer->offset);
++    from_raw(node->ret_buffer->ty);
+     push();
+   }
+ 
+@@ -611,6 +733,7 @@ static void copy_struct_reg(void) {
+   Type *ty = current_fn->ty->return_ty;
+   int gp = 0, fp = 0;
+ 
++  resolve_access(ty->size);
+   println("  mov %%rax, %%rdi");
+ 
+   if (has_flonum(ty, 0, 8, 0)) {
+@@ -652,7 +775,12 @@ static void copy_struct_mem(void) {
+   Type *ty = current_fn->ty->return_ty;
+   Obj *var = current_fn->params;
+ 
+-  println("  mov %d(%%rbp), %%rdi", var->offset);
++  push();
++  println("  mov %d(%%rbp), %%rax", var->offset);
++  resolve_access(ty->size);
++  println("  mov %%rax, %%rdi");
++  pop("%rax");
++  resolve_access(ty->size);
+ 
+   for (int i = 0; i < ty->size; i++) {
+     println("  mov %d(%%rax), %%dl", i);
+@@ -747,13 +875,23 @@ static void gen_expr(Node *node) {
+     }
+ 
+     println("  neg %%rax");
++    if (!node->ty->is_unsigned) {
++      int neg_ok = count();
++      println("  jno .L.integer.ok.%d", neg_ok);
++      safe_call("__safe_integer_overflow");
++      println(".L.integer.ok.%d:", neg_ok);
++    }
+     return;
+   case ND_VAR:
+     gen_addr(node);
++    if (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)
++      narrow(node->ty);
+     load(node->ty);
+     return;
+   case ND_MEMBER: {
+     gen_addr(node);
++    if (node->ty->kind == TY_ARRAY || node->ty->kind == TY_VLA)
++      narrow(node->ty);
+     load(node->ty);
+ 
+     Member *mem = node->member;
+@@ -772,6 +910,8 @@ static void gen_expr(Node *node) {
+     return;
+   case ND_ADDR:
+     gen_addr(node->lhs);
++    if (node->lhs->ty->kind != TY_FUNC)
++      narrow(node->lhs->ty);
+     return;
+   case ND_ASSIGN:
+     gen_addr(node->lhs);
+@@ -982,6 +1122,19 @@ static void gen_expr(Node *node) {
+     pop("%rdi"); // addr
+ 
+     int sz = node->cas_addr->ty->base->size;
++    push();
++    println("  push %%rdx");
++    depth++;
++    println("  push %%rdi");
++    depth++;
++    println("  mov %%r8, %%rax");
++    resolve_access(sz);
++    println("  mov %%rax, %%r8");
++    pop("%rax");
++    resolve_access(sz);
++    println("  mov %%rax, %%rdi");
++    pop("%rdx");
++    pop("%rax");
+     println("  lock cmpxchg %s, (%%rdi)", reg_dx(sz));
+     println("  sete %%cl");
+     println("  je 1f");
+@@ -997,6 +1150,11 @@ static void gen_expr(Node *node) {
+     pop("%rdi");
+ 
+     int sz = node->lhs->ty->base->size;
++    push();
++    println("  mov %%rdi, %%rax");
++    resolve_access(sz);
++    println("  mov %%rax, %%rdi");
++    pop("%rax");
+     println("  xchg %s, (%%rdi)", reg_ax(sz));
+     return;
+   }
+@@ -1112,16 +1270,76 @@ static void gen_expr(Node *node) {
+ 
+   switch (node->kind) {
+   case ND_ADD:
++    if (node->ty->base) {
++      println("  mov %%rdi, %%rsi");
++      println("  mov %%rax, %%rdi");
++      println("  mov $%d, %%edx", node->rhs->ty->is_unsigned);
++      safe_call("__safe_add");
++      return;
++    }
+     println("  add %s, %s", di, ax);
++    int add_ok = count();
++    println("  j%s .L.integer.ok.%d", node->ty->is_unsigned ? "nc" : "no", add_ok);
++    safe_call("__safe_integer_overflow");
++    println(".L.integer.ok.%d:", add_ok);
+     return;
+   case ND_SUB:
++    if (node->lhs->ty->base && node->rhs->ty->base) {
++      println("  mov %%rdi, %%rsi");
++      println("  mov %%rax, %%rdi");
++      safe_call("__safe_diff");
++      return;
++    }
++    if (node->ty->base) {
++      println("  neg %%rdi");
++      println("  mov %%rdi, %%rsi");
++      println("  mov %%rax, %%rdi");
++      println("  mov $%d, %%edx", node->rhs->ty->is_unsigned);
++      safe_call("__safe_add");
++      return;
++    }
+     println("  sub %s, %s", di, ax);
++    int sub_ok = count();
++    println("  j%s .L.integer.ok.%d", node->ty->is_unsigned ? "nc" : "no", sub_ok);
++    safe_call("__safe_integer_overflow");
++    println(".L.integer.ok.%d:", sub_ok);
+     return;
+   case ND_MUL:
+-    println("  imul %s, %s", di, ax);
++    int mul_ok = count();
++    if (node->ty->is_unsigned) {
++      println("  mul %s", di);
++      println("  test %s, %s", dx, dx);
++      println("  jz .L.integer.ok.%d", mul_ok);
++    } else {
++      println("  imul %s, %s", di, ax);
++      println("  jno .L.integer.ok.%d", mul_ok);
++    }
++    safe_call("__safe_integer_overflow");
++    println(".L.integer.ok.%d:", mul_ok);
+     return;
+   case ND_DIV:
+   case ND_MOD:
++    int divisor_ok = count();
++    println("  cmp $0, %s", di);
++    println("  jne .L.divisor.ok.%d", divisor_ok);
++    safe_call("__safe_integer_overflow");
++    println(".L.divisor.ok.%d:", divisor_ok);
++
++    if (!node->ty->is_unsigned) {
++      int quotient_ok = count();
++      println("  cmp $-1, %s", di);
++      println("  jne .L.integer.ok.%d", quotient_ok);
++      if (node->lhs->ty->size == 8) {
++        println("  movabs $0x8000000000000000, %%r11");
++        println("  cmp %%r11, %%rax");
++      } else {
++        println("  cmp $-2147483648, %%eax");
++      }
++      println("  jne .L.integer.ok.%d", quotient_ok);
++      safe_call("__safe_integer_overflow");
++      println(".L.integer.ok.%d:", quotient_ok);
++    }
++
+     if (node->ty->is_unsigned) {
+       println("  mov $0, %s", dx);
+       println("  div %s", di);
+@@ -1149,6 +1367,14 @@ static void gen_expr(Node *node) {
+   case ND_NE:
+   case ND_LT:
+   case ND_LE:
++    if (node->lhs->ty->base || node->rhs->ty->base) {
++      println("  mov %%rdi, %%rsi");
++      println("  mov %%rax, %%rdi");
++      println("  mov $%d, %%edx", node->kind == ND_EQ ? 0 :
++              node->kind == ND_NE ? 1 : node->kind == ND_LT ? 2 : 3);
++      safe_call("__safe_compare");
++      return;
++    }
+     println("  cmp %s, %s", di, ax);
+ 
+     if (node->kind == ND_EQ) {
+@@ -1432,6 +1658,42 @@ static void emit_data(Obj *prog) {
+   }
+ }
+ 
++// Register static-storage objects before main.  The emitted constructor is
++// part of each compiled translation unit, so separately compiled objects keep
++// their own globals protected as well.
++static void emit_safe_globals(Obj *prog) {
++  println("  .text");
++  println("  .type .L.safe_globals_init, @function");
++  println(".L.safe_globals_init:");
++  println("  push %%rbp");
++  println("  mov %%rsp, %%rbp");
++
++  for (Obj *var = prog; var; var = var->next) {
++    if (var->is_function || !var->is_definition || var->is_tls || var->ty->size <= 0)
++      continue;
++    println("  lea %s(%%rip), %%rdi", var->name);
++    println("  mov $%d, %%rsi", var->ty->size);
++    println("  call __safe_register_global@PLT");
++  }
++
++  for (Obj *var = prog; var; var = var->next) {
++    if (var->is_function || !var->is_definition || var->is_tls)
++      continue;
++    for (Relocation *rel = var->rel; rel; rel = rel->next) {
++      println("  lea %s+%d(%%rip), %%rdi", var->name, rel->offset);
++      println("  mov $%ld, %%rsi", rel->addend);
++      println("  mov $%ld, %%rdx", rel->lower_addend);
++      println("  mov $%zu, %%rcx", rel->bound_size);
++      println("  call __safe_relocate_global_pointer@PLT");
++    }
++  }
++
++  println("  pop %%rbp");
++  println("  ret");
++  println("  .section .init_array,\"aw\"");
++  println("  .quad .L.safe_globals_init");
++}
++
+ static void store_fp(int r, int offset, int sz) {
+   switch (sz) {
+   case 4:
+@@ -1564,6 +1826,24 @@ static void emit_text(Obj *prog) {
+     }
+ 
+     // Emit code
++    for (Obj *var = fn->locals; var; var = var->next) {
++      if (var->ty->kind == TY_VLA) {
++        // A VLA local is represented by an eight-byte slot holding the
++        // dynamically allocated object's native address.
++        println("  lea %d(%%rbp), %%rdi", var->offset);
++        println("  mov $8, %%rsi");
++        println("  mov %%rbp, %%rdx");
++        println("  call __safe_register_stack@PLT");
++        continue;
++      }
++      if (var->ty->size <= 0)
++        continue;
++      println("  lea %d(%%rbp), %%rdi", var->offset);
++      println("  mov $%d, %%rsi", var->ty->size);
++      println("  mov %%rbp, %%rdx");
++      println("  call __safe_register_stack@PLT");
++    }
++
+     gen_stmt(fn->body);
+     assert(depth == 0);
+ 
+@@ -1576,6 +1856,16 @@ static void emit_text(Obj *prog) {
+ 
+     // Epilogue
+     println(".L.return.%s:", fn->name);
++    println("  sub $32, %%rsp");
++    println("  mov %%rax, 0(%%rsp)");
++    println("  mov %%rdx, 8(%%rsp)");
++    println("  movdqu %%xmm0, 16(%%rsp)");
++    println("  mov %%rbp, %%rdi");
++    println("  call __safe_leave_frame@PLT");
++    println("  mov 0(%%rsp), %%rax");
++    println("  mov 8(%%rsp), %%rdx");
++    println("  movdqu 16(%%rsp), %%xmm0");
++    println("  add $32, %%rsp");
+     println("  mov %%rbp, %%rsp");
+     println("  pop %%rbp");
+     println("  ret");
+@@ -1591,5 +1881,6 @@ void codegen(Obj *prog, FILE *out) {
+ 
+   assign_lvar_offsets(prog);
+   emit_data(prog);
++  emit_safe_globals(prog);
+   emit_text(prog);
+ }
+diff --git a/parse.c b/parse.c
+index 6acaeb8cf1ad615321b24adc017331d756725780..b627f1a596e83993be9f6ac1f7d835eb28f5d216 100644
+--- a/parse.c
++++ b/parse.c
+@@ -1400,6 +1400,43 @@ static uint64_t read_buf(char *buf, int sz) {
+   unreachable();
+ }
+ 
++static bool pointer_initializer_bounds(Node *node, long *lower, size_t *size) {
++  switch (node->kind) {
++  case ND_CAST:
++    return pointer_initializer_bounds(node->lhs, lower, size);
++  case ND_ADD:
++  case ND_SUB:
++    return pointer_initializer_bounds(node->lhs, lower, size);
++  case ND_VAR:
++    if (node->var->ty->kind != TY_ARRAY)
++      return false;
++    *lower = 0;
++    *size = node->var->ty->size;
++    return true;
++  case ND_ADDR:
++    if (node->lhs->kind == ND_VAR) {
++      *lower = 0;
++      *size = node->lhs->var->ty->size;
++      return true;
++    }
++    return pointer_initializer_bounds(node->lhs, lower, size);
++  case ND_DEREF:
++    return pointer_initializer_bounds(node->lhs, lower, size);
++  case ND_MEMBER:
++    if (node->lhs->kind == ND_VAR) {
++      *lower = 0;
++      *size = node->lhs->var->ty->size;
++    } else if (!pointer_initializer_bounds(node->lhs, lower, size)) {
++        return false;
++    }
++    *lower += node->member->offset;
++    *size = node->member->ty->size;
++    return true;
++  default:
++    return false;
++  }
++}
++
+ static void write_buf(char *buf, uint64_t val, int sz) {
+   if (sz == 1)
+     *buf = val;
+@@ -1475,6 +1512,9 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
+   rel->offset = offset;
+   rel->label = label;
+   rel->addend = val;
++  if (!pointer_initializer_bounds(init->expr, &rel->lower_addend,
++                                  &rel->bound_size))
++    rel->bound_size = 0;
+   cur->next = rel;
+   return cur->next;
+ }
+@@ -1514,6 +1554,7 @@ static bool is_typename(Token *tok) {
+ }
+ 
+ // asm-stmt = "asm" ("volatile" | "inline")* "(" string-literal ")"
++__attribute__((unused))
+ static Node *asm_stmt(Token **rest, Token *tok) {
+   Node *node = new_node(ND_ASM, tok);
+   tok = tok->next;
+@@ -1706,15 +1747,11 @@ static Node *stmt(Token **rest, Token *tok) {
+   }
+ 
+   if (equal(tok, "asm"))
+-    return asm_stmt(rest, tok);
++    error_tok(tok, "inline assembly is outside the safe subset");
+ 
+   if (equal(tok, "goto")) {
+     if (equal(tok->next, "*")) {
+-      // [GNU] `goto *ptr` jumps to the address specified by `ptr`.
+-      Node *node = new_node(ND_GOTO_EXPR, tok);
+-      node->lhs = expr(&tok, tok->next->next);
+-      *rest = skip(tok, ";");
+-      return node;
++      error_tok(tok, "computed goto is outside the safe subset");
+     }
+ 
+     Node *node = new_node(ND_GOTO, tok);
+@@ -2529,12 +2566,7 @@ static Node *unary(Token **rest, Token *tok) {
+ 
+   // [GNU] labels-as-values
+   if (equal(tok, "&&")) {
+-    Node *node = new_node(ND_LABEL_VAL, tok);
+-    node->label = get_ident(tok->next);
+-    node->goto_next = gotos;
+-    gotos = node;
+-    *rest = tok->next->next;
+-    return node;
++    error_tok(tok, "labels as values are outside the safe subset");
+   }
+ 
+   return postfix(rest, tok);
+@@ -2872,6 +2904,18 @@ static Node *postfix(Token **rest, Token *tok) {
+ }
+ 
+ // funcall = (assign ("," assign)*)? ")"
++static bool is_safe_runtime_function(char *name) {
++  static char *names[] = {
++    "__safe_malloc", "__safe_calloc", "__safe_realloc", "__safe_free",
++    "__safe_memcpy", "__safe_memmove", "__safe_memset", "__safe_strlen",
++    "__safe_strcpy", "__safe_printf", "__safe_collect", "alloca",
++  };
++  for (int i = 0; i < sizeof(names) / sizeof(*names); i++)
++    if (!strcmp(name, names[i]))
++      return true;
++  return false;
++}
++
+ static Node *funcall(Token **rest, Token *tok, Node *fn) {
+   add_type(fn);
+ 
+@@ -2879,6 +2923,13 @@ static Node *funcall(Token **rest, Token *tok, Node *fn) {
+       (fn->ty->kind != TY_PTR || fn->ty->base->kind != TY_FUNC))
+     error_tok(fn->tok, "not a function");
+ 
++  if (fn->ty->kind == TY_PTR)
++    error_tok(fn->tok, "indirect function calls are outside the safe subset");
++
++  if (fn->kind != ND_VAR ||
++      (!fn->var->is_definition && !is_safe_runtime_function(fn->var->name)))
++    error_tok(fn->tok, "call to a function without a checked runtime contract");
++
+   Type *ty = (fn->ty->kind == TY_FUNC) ? fn->ty : fn->ty->base;
+   Type *param_ty = ty->params;
+ 
+diff --git a/type.c b/type.c
+index 02ade592ee758d163fd67e755ff3f71d3e071c91..9bc5ab6f4ba9a3058c224dc4820a0157b96d5d5d 100644
+--- a/type.c
++++ b/type.c
+@@ -196,6 +196,16 @@ void add_type(Node *node) {
+     return;
+   case ND_ADD:
+   case ND_SUB:
++    // Pointer arithmetic is typed by the parser. Do not apply the usual
++    // arithmetic conversions here: doing so inserts a synthetic
++    // integer-to-pointer cast for the scaled offset.
++    if (node->lhs->ty->base && is_integer(node->rhs->ty)) {
++      node->ty = node->lhs->ty;
++      return;
++    }
++    usual_arith_conv(&node->lhs, &node->rhs);
++    node->ty = node->lhs->ty;
++    return;
+   case ND_MUL:
+   case ND_DIV:
+   case ND_MOD:
