@@ -55,12 +55,14 @@ When writing instructions or specifications:
 1. Describe the current version of the task. When the user asks you to revise
    the task, or you revise it to fix bugs, do NOT refer to previous versions of
    the task or mention that a bug was fixed.
-2. In a language specification, favor starting with a compact grammar, followed
+2. In `instruction.md`, organize the task as "What Is Provided" followed by
+   "What You Must Build."
+3. In a language specification, favor starting with a compact grammar, followed
    by the semantics, and then the expected CLI interface to any implementation
    is provided or the agent has to build.
-3. When describing an implementation that the agent must build, make the expected
+4. When describing an implementation that the agent must build, make the expected
    CLI behavior explicit.
-4. Ensure the environment has all the packages needed to solve the problem.
+5. Ensure the environment has all the packages needed to solve the problem.
 
 When writing tests for the verifier:
 
