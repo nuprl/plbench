@@ -1,0 +1,4 @@
+exception Escapes;;
+
+raise Escapes;;
+

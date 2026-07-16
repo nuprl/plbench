@@ -45,6 +45,9 @@ unvetted tasks in this repository.
    memory safety and garbage collection for a C compiler, taking inspiration
    from Fil-C.
 
+6. **[`tasks/caml_light_checked_exceptions`](tasks/caml_light_checked_exceptions):**
+   Add checked exceptions to Caml Light from 2002.
+
 ## Evaluation Results
 
 | Task | GPT-5.6 Sol (medium) | Claude Opus 4.8 (high) |
@@ -53,6 +56,7 @@ unvetted tasks in this repository.
 | gradual-type-migration | 0.44 | 0.87 |
 | chibicc-memory-safe | 0.00 | 0.00 |
 | scheme-typeinf | 0.00 | 0.00 |
+| caml-light-checked-exceptions | 0.00 | — |
 
 ## Developing Tasks
 
