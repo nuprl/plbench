@@ -118,6 +118,14 @@ for its conclusion. Add adversarial tests when the inspection exposes an
 important case not already covered, then rerun Harbor and repeat the audit
 on the revised task.
 
+## View on Hub:
+
+```bash
+hf sync jobs/prototype/ hf://buckets/arjunguha/plbench
+```
+
+
+
 ## Example Runs
 
 For example, this runs Codex on one task under Podman and downloads `/app` as
@@ -132,3 +140,5 @@ harbor run -p tasks/scheme-typeinf -e podman -a codex -m openai/gpt-5.5 \
   --ae CODEX_FORCE_AUTH_JSON=true \
   --artifact /app
 ```
+
+To run with Claude Code and without spending API credits, `source scripts/claude_oauth.sh`.
