@@ -66,26 +66,42 @@ When writing instructions or specifications:
 
 When writing tests for the verifier:
 
-1. The verifier controls everything in `./tests`. It should assume that
-   all files are present and does not need to test for the presence of
-   anything in `./tests`.
-2. The agent controls everything in `/app`. If you need something from `/app`,
+1. The verifier runs in a clean container with a fully known filesystem. Do not
+   create randomly named temporary directories. When the verifier needs to
+   create or copy files, use a fixed, hardcoded location.
+2. The verifier controls everything in `./tests`. Assume that files committed
+   to the repository or its submodules are present and that committed test
+   directories contain the intended number of files. Do not add checks for
+   their presence or expected file counts.
+3. The agent controls everything in `/app`. If you need something from `/app`,
    do NOT duplicate it in `./tests`. Instead, copy it over from `/app` in the
    verifier. E.g., if /app has a tool that both the environment and verifier needs,
    ensure the tool is built for the environment and copy it into a trusted path.
    Embed the md5 hash of any tool you copy into the test code, and check that
    the md5 hash is correct, so that an agent cannot modify a trusted tool.
-3. If the tests rely on a private reference implementation, put it in /tests
+4. If the tests rely on a private reference implementation, put it in /tests
    and not in the environment.
-4. Structure the verifier so that the main grading path reads linearly.
-5. Keep in mind that certain errors are really errors in the verifier. Think
+5. Structure the verifier so that the main grading path reads linearly.
+6. Keep in mind that certain errors are really errors in the verifier. Think
    though what these may be and throw an exception when such an error occurs.
    Do NOT just return reward 0.
-6. The oracle, environment, and verifier must be consistent. When you change any
+7. The oracle, environment, and verifier must be consistent. When you change any
    one of them, you may need to update the other two for consistency. After
    a consistency pass, run Harbor on the oracle. If the user asks you to
    stop running the oracle (it can take time), offer to do so after significant
    changes.
+
+### Style Guide for Verifier
+
+Document every function. The verifier runs in container that we create, and
+the agent writes results to specific paths. If you write code that relies on
+a file that is in the environment -- you can assume it is there. There is
+no need to test for its presence. At the start of the main function, test
+for the existence of files that the agent must create, and abort with
+an exception if they are not present. After that, use the paths directly.
+Do NOT test for environment variables. The container specifies its environment -- any environment variable test is pointless.
+
+### Audit Run
 
 Finally, when you evaluate a real, agent-written solution, offer to have a
 sub-agent independently audit the generated solution, and describe this audit

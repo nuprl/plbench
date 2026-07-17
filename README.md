@@ -48,6 +48,10 @@ unvetted tasks in this repository.
 6. **[`tasks/caml_light_checked_exceptions`](tasks/caml_light_checked_exceptions):**
    Add checked exceptions to Caml Light from 2002.
 
+7. **[`tasks/build_data_race_detector`](tasks/build_data_race_detector):** Build
+   a data race detector for C/OpenMP programs, using DataRaceBench to evaluate.
+
+
 ## Evaluation Results
 
 | Task | GPT-5.6 Sol (medium) | Claude Opus 4.8 (high) |

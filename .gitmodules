@@ -1,0 +1,3 @@
+[submodule "tasks/build_data_race_detector/tests/dataracebench"]
+	path = tasks/build_data_race_detector/tests/dataracebench
+	url = https://github.com/LLNL/dataracebench.git
