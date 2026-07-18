@@ -39,7 +39,7 @@ unvetted tasks in this repository.
 
 4. **[`tasks/gradual-type-migration`](tasks/gradual-type-migration):**
    Implement type inference for the gradually typed lambda calculus. This task
-   borrows significantly from my OOPSLA 2022 paper.
+   borrows significantly from an OOPSLA 2022 paper.
 
 5. **[`tasks/chibicc-memory-safe`](tasks/chibicc-memory-safe):** Implement
    memory safety and garbage collection for a C compiler, taking inspiration
@@ -54,13 +54,7 @@ unvetted tasks in this repository.
 
 ## Evaluation Results
 
-| Task | GPT-5.6 Sol (medium) | Claude Opus 4.8 (high) |
-|---|---:|---:|
-| ilvm-self-hosting-compiler | 0.50 | 0.00 |
-| gradual-type-migration | 0.44 | 0.87 |
-| chibicc-memory-safe | 0.00 | 0.00 |
-| scheme-typeinf | 0.00 | 0.00 |
-| caml-light-checked-exceptions | 0.00 | — |
+See https://huggingface.co/spaces/arjunguha/plbench.
 
 ## Developing Tasks
 
