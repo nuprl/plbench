@@ -9,7 +9,6 @@ keywords = ["programming-languages", "self-hosting", "ilvm", "scheme", "compiler
 [metadata]
 category = "programming-languages"
 difficulty = "hard"
-vetted = true
 
 [verifier]
 timeout_sec = 900.0

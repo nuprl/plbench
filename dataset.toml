@@ -8,10 +8,11 @@ authors = []
 keywords = ["programming-languages", "ilvm", "typewhich", "scheme"]
 
 tasks = [
+  { path = "tasks/build_data_race_detector" },
+  { path = "tasks/caml_light_checked_exceptions" },
+  { path = "tasks/chibicc-memory-safe" },
+  { path = "tasks/gradual-type-migration" },
   { path = "tasks/ilvm-interpreter" },
   { path = "tasks/ilvm-self-hosting-compiler" },
-  { path = "tasks/typewhich" },
-  { path = "tasks/gradual-type-migration" },
   { path = "tasks/scheme-typeinf" },
-  { path = "tasks/scheme-tail-call-compiler" },
 ]
