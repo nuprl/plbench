@@ -51,6 +51,9 @@ unvetted tasks in this repository.
 7. **[`tasks/build_data_race_detector`](tasks/build_data_race_detector):** Build
    a data race detector for C/OpenMP programs, using DataRaceBench to evaluate.
 
+8. **[`tasks/lean_cbv_lc_termination`](tasks/lean_cbv_lc_termination):** Prove
+   that all programs terminate in the call-by-value lambda calculus using Lean.
+
 
 ## Evaluation Results
 
@@ -68,7 +71,7 @@ the primary prompts I used to develop the memory safe C Compiler task. All typos
    these in the Fil-C codebase.
 2. Longjmp is also out of scope. So look at the early versions of Fil-C. The
    latest versions add more bells and whistles I don’t care about.
-3. Wait -- tinycc already has a bounds check? Come on -- that trivializes the
+3Yeah. . Wait -- tinycc already has a bounds check? Come on -- that trivializes the
    problem. Please delete this oracle. Instead, create a new oracle based on
    [rui314/chibicc](https://github.com/rui314/chibicc).
 4. Okay, but you haven't actually garbage collected anything, right? Um, I want
