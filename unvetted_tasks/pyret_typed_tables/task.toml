@@ -15,9 +15,10 @@ difficulty = "hard"
 
 [verifier]
 # Generous: the objective verifier runs the full `ts-type-check-test`
-# regression suite (rebuilds the TS type-check harness and type-checks ~160
-# programs), plus the agent's examples and the probe suite.
-timeout_sec = 3600.0
+# regression suite (rebuilds the TS type-check harness and type-checks/runs
+# ~160 programs single-threaded, ~45 min on the baseline), plus the agent's
+# examples and the probe suite.
+timeout_sec = 5400.0
 
 [agent]
 # This is a large, open-ended design task; the reference run was one of the

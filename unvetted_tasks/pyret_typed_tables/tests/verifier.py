@@ -63,9 +63,10 @@ DETAILS = Path("/logs/verifier/objective-details.json")
 # builtin cache costs ~15s; a wrapper that recompiles from scratch each call
 # still fits comfortably.
 TYPECHECK_TIMEOUT = 180.0
-# The regression suite rebuilds the type-check harness and checks ~160
-# programs; give it most of the verifier budget.
-REGRESSION_TIMEOUT = 2400.0
+# The regression suite rebuilds the type-check harness and type-checks (and
+# runs) ~160 programs single-threaded; on the baseline this takes ~45 minutes,
+# so it needs most of the verifier budget.
+REGRESSION_TIMEOUT = 4200.0
 BUILD_TIMEOUT = 900.0
 
 # Real Pyret table vocabulary the agent must be typing (the *value*-level table
@@ -129,8 +130,9 @@ def run(cmd, cwd=None, timeout=None):
             cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout
         )
     except subprocess.TimeoutExpired as error:
+        # TimeoutExpired.stdout is bytes even under text=True; normalize to str.
         return subprocess.CompletedProcess(
-            cmd, 124, error.stdout or "", f"timeout after {timeout:g}s"
+            cmd, 124, _as_text(error.stdout), f"timeout after {timeout:g}s"
         )
 
 
@@ -270,9 +272,18 @@ def check_examples(result: Result) -> bool:
     return typecheck_ok and nontrivial_ok
 
 
+def _as_text(value) -> str:
+    """Coerce a str/bytes/None subprocess stream into a str."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _tail(proc: subprocess.CompletedProcess, n: int = 600) -> str:
     """Return the last n characters of a process's combined output."""
-    text = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+    text = (_as_text(proc.stdout) + "\n" + _as_text(proc.stderr)).strip()
     return text[-n:]
 
 
