@@ -1,0 +1,96 @@
+# Subjective rubric for the Pyret table-types task (RewardKit judge).
+#
+# This file is the single source of truth for the rubric criteria. Two graders
+# consume it:
+#
+#   * RewardKit / LiteLLM (the portable path): in an environment with model
+#     credentials, `rewardkit /tests/judge.toml` grades the criteria below via
+#     the configured judge model.
+#   * host_judge.py (the credential-light path used on VMs that only have a
+#     Claude Code OAuth token): it parses the same [[criterion]] blocks, grades
+#     them with a single headless `claude -p` call against the downloaded
+#     artifact, and writes an equivalent subjective score. Because both graders
+#     read THIS file, the rubric text cannot drift between them.
+#
+# The judge reads the agent's design report, its typed example programs, and
+# its diff against the baseline compiler — not just the report's claims.
+
+[judge]
+judge = "anthropic/claude-sonnet-5"
+files = [
+    "/app/DESIGN.md",
+    "/app/typed-examples",
+    "/app/agent-changes.diff",
+]
+weight = 1.0
+
+[[criterion]]
+id = "design_soundness"
+description = """
+Soundness of the design as described. The report should make a credible,
+specific argument that the table type system is sound: that a value typed at a
+table/row/column type really has that shape at runtime, that no typing rule can
+produce a value at a wrong type, and that wherever the checker cannot be precise
+it degrades to an opaque table / Any rather than assigning an incorrect schema.
+Credit concrete reasoning (e.g. why a particular subtyping rule is or isn't
+allowed); penalize hand-waving, "trust me", or rules that are plainly unsound.
+"""
+type = "likert"
+points = 5
+weight = 2.0
+
+[[criterion]]
+id = "b2t2_alignment"
+description = """
+Philosophical alignment with B2T2 (arXiv:2111.10412, "Types for Tables"). The
+design should track column schemas in the way the benchmark motivates, and be
+able to show representative B2T2 examples passing — catching the wrong-column /
+missing-column mistakes the paper highlights (e.g. dotProduct given a
+non-numeric or non-existent column, the pHacking / pieCount family of bugs). It
+should reject the paper's error cases, not merely accept its positive ones.
+"""
+type = "likert"
+points = 5
+weight = 1.5
+
+[[criterion]]
+id = "core_arr_operations"
+description = """
+Ability to type realistic operations from Bootstrap's core.arr. The system
+should meaningfully type-check functions like group() that take column names as
+arguments, and functions that append or compute new columns, rather than
+collapsing them to Any. The typed examples should demonstrate such operations
+working with precise result types.
+"""
+type = "likert"
+points = 5
+weight = 1.5
+
+[[criterion]]
+id = "limitations_honesty"
+description = """
+Honesty and quality of the limitations report. The report should specifically
+and accurately state which features are left untypable (e.g. computed column
+names) and why, and its claims should match what the diff and examples actually
+implement. Penalize overclaiming (asserting support that the code does not back
+up) and vague or absent limitations discussion.
+"""
+type = "likert"
+points = 5
+weight = 1.0
+
+[[criterion]]
+id = "examples_quality"
+description = """
+Quality of the typed example programs. They should be substantive, varied, and
+representative — adapted from the B2T2 examples and from core.arr's
+table-related functions — and should genuinely exercise the new table types
+(construction, column/row operations, schema-dependent results) rather than
+being trivial programs that happen to type-check.
+"""
+type = "likert"
+points = 5
+weight = 1.0
+
+[scoring]
+aggregation = "weighted_mean"
