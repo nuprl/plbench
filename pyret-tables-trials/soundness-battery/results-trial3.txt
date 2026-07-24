@@ -1,0 +1,13 @@
+D2-transform-then-numreq | TC=REJECT | Type checking failed because of a type inconsistency. 
+D3-buildcol-sort | TC=REJECT | Type checking failed because of a type inconsistency. 
+F3-bracket-retype | TC=REJECT | Type checking failed because of a type inconsistency. 
+F4-stack-mismatch | TC=REJECT | Type checking failed because of a type inconsistency. 
+F5-empty-infer | TC=REJECT | Type checking failed because of a type inconsistency. 
+R1-getcol-missing | TC=REJECT | This program cannot be type-checked. The reason that it cannot be type-checked is: the table has no column named `nope`;
+R2-postdrop | TC=REJECT | This program cannot be type-checked. The reason that it cannot be type-checked is: the table has no column named `age`; 
+R3-wrong-sort-arg | TC=REJECT | Type checking failed because of a type inconsistency. 
+W1-cell-ann | TC=REJECT | Type checking failed because of a type inconsistency. 
+W1b-cell-ann-row | TC=REJECT | Type checking failed because of a type inconsistency. 
+W2-addcol-collision | TC=ACCEPT RUN_exit=1 | The run ended in error:  column-name-exists Pyret stack:   file:///bat/W2-addcol-collision.arr: line 2, column 2   file:///bat/W2-addcol-collision.arr: line 4, column 6 
+W3-rename-collision | TC=ACCEPT RUN_exit=1 | The run ended in error:  transform-column: tried changing the name of column a to b but that new name already exists as a column name (existing column name(s) were a, b) Pyret stack:   file:///bat/W3-rename-collision.arr
+W4-depth-mismatch | TC=REJECT | Type checking failed because of a type inconsistency. 
