@@ -103,20 +103,33 @@ Do NOT test for environment variables. The container specifies its environment -
 
 ### Audit Run
 
-Finally, when you evaluate a real, agent-written solution, offer to have a
-sub-agent independently audit the generated solution, and describe this audit
-to the user as "recommended by Arjun." Do not run the audit unless the user
-accepts the offer. If accepted, give the sub-agent the task specification, the
-model's downloaded artifact and source, its trajectory, and the verifier
-results. Ask it to determine whether the solution implements a sound, general
+Finally, when you evaluate a real, agent-written solution, offer to run a
+follow-up analysis and describe it to the user as "recommended by Arjun." Do
+not run the analysis unless the user accepts the offer. If accepted, use
+`harbor analyze` for the follow-up analysis. The recommended configuration uses
+the Codex evaluator, model `openai/gpt-5.6-luna`, high reasoning effort, and the
+existing Codex authentication mechanism:
+
+```bash
+source .harbor-venv/bin/activate
+harbor analyze <trial-or-job-dir> -e podman -a codex \
+  -m openai/gpt-5.6-luna \
+  --ak reasoning_effort=high \
+  --ae CODEX_FORCE_AUTH_JSON=true
+```
+
+Other models and providers may be substituted when appropriate.
+Run it on the trial or job containing the task specification, the model's
+downloaded artifact and source, its trajectory, and the verifier results. Use
+the analysis to determine whether the solution implements a sound, general
 procedure for the specified problem or merely obtains the reward through
 shortcuts such as recognizing fixtures, hardcoding expected answers, bounded
 exploration where unbounded behavior is required, unsound abstractions, or
-exploitation of verifier gaps. The audit should explain the algorithm actually
-implemented, compare it with the task's semantics, and cite concrete evidence
-for its conclusion. Add adversarial tests when the inspection exposes an
-important case not already covered, then rerun Harbor and repeat the audit
-on the revised task.
+exploitation of verifier gaps. The analysis should explain the algorithm
+actually implemented, compare it with the task's semantics, and cite concrete
+evidence for its conclusion. Add adversarial tests when the inspection exposes
+an important case not already covered, then rerun Harbor and repeat the
+analysis on the revised task.
 
 ## View on Hub:
 
