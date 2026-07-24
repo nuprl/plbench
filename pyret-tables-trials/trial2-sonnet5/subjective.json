@@ -1,0 +1,30 @@
+{
+  "subjective": 0.6107142857142858,
+  "criteria": {
+    "design_soundness": {
+      "score": 0.5,
+      "weight": 2.0,
+      "reasoning": "The architecture argument is genuinely specific rather than hand-wavy \u2014 a strict 'unknown \u2264 anything, unknown has no columns to violate' invariant, width subtyping that mirrors the pre-existing, already-sound record-subtyping rule, and an explicit erasure trick (eraseTableTypeApp) so the general checker's own unification is unaffected. However, the call-site rule 'if the argument's schema is unknown, no check happens (permissive)' means a function's declared Table<{...}> parameter schema is trusted inside the body even when the actual argument's real schema was never verified \u2014 a genuine static-typing soundness gap the report never explicitly analyzes (it only argues the *no-annotation* case is inert, not this mixed case). Most importantly, table-check.ts \u2014 the single file that implements every rule described \u2014 is entirely absent from the diff, so the central soundness claims can only be checked indirectly via unit-test outcomes, not against the actual algorithm."
+    },
+    "b2t2_alignment": {
+      "score": 0.55,
+      "weight": 1.5,
+      "reasoning": "The positive examples plausibly track B2T2's own scenarios (students select/order, addColumn with a fresh-name check, a jellybean/pHacking-flavored row predicate over Row<{...}>), and the design report explicitly reasons about the paper's column-name-as-first-class-value challenge (\u00a76). But none of the 'TYPED EXAMPLES' actually shows a B2T2-style negative program (e.g., selecting a column dotProduct-style that doesn't exist, or reproducing the paper's specific bug) being rejected \u2014 the only rejection evidence is generic, non-B2T2-framed cases in run-unit-tests.js (missing column, duplicate column, schema mismatch), so alignment with the paper's emphasis on *catching* its named errors is asserted but not concretely demonstrated in the example set."
+    },
+    "core_arr_operations": {
+      "score": 0.6,
+      "weight": 1.5,
+      "reasoning": "04-core-group-and-count.arr and 06-core-predict-col.arr do meaningfully exercise column-name-parameterized functions and column-appending operations with precise result schemas (Table<{value::String, subtable::Table}>, build-column composition, etc.), which is real, non-trivial value. But both are substantially rewritten away from core.arr's actual implementations (swapping for-fold for L.fold, avoiding r['subtable'].length(), replacing arithmetic residuals with equality flags) rather than type-checking the real core.arr code, and core.arr's actual group/count/mean functions are explicitly left completely untyped by design \u2014 so the claim of typing 'realistic operations from core.arr' is more 'inspired-by rewrites' than the originals themselves, and this can't be checked against table-check.ts's real logic since that file isn't in the diff."
+    },
+    "limitations_honesty": {
+      "score": 0.85,
+      "weight": 1.0,
+      "reasoning": "The limitations sections (\u00a75 and \u00a76) are unusually specific and self-critical: they name exact untypable constructs (computed column names, reducer output types, arithmetic on getBracket-derived cell values, module-qualified access to tables.arr, s-table-update), explain the underlying mechanism for each, and tie each limitation to concrete example-file adaptations (e.g., '04' and '06' avoiding arithmetic on cell values). This matches what the provided examples actually do (all avoid the disclosed gaps), and the report does not appear to overclaim support the examples don't back up."
+    },
+    "examples_quality": {
+      "score": 0.7,
+      "weight": 1.0,
+      "reasoning": "Six examples cover a reasonable range \u2014 table literal + select/extract/order, addColumn with freshness checking, width-subtyping across function calls, two core.arr-derived multi-column-operation programs, and a Row-predicate/drop/column-enumeration example \u2014 genuinely exercising construction, column ops, and schema-dependent result types rather than trivial code. The set is weakened by being entirely positive (no example demonstrates a rejected program, despite the paper's emphasis on catching mistakes) and by several examples' most interesting operations (arithmetic on cell values, subtable extraction) being deliberately routed around rather than demonstrated working."
+    }
+  }
+}

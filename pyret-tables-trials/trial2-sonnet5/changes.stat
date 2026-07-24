@@ -1,0 +1,9 @@
+ lang/package-lock.json                         |   3 +
+ lang/src/js/trove/global.js                    |  55 ++++++-
+ lang/src/ts-compiler/src/compile-errors.ts     | 112 +++++++++++++-
+ lang/src/ts-compiler/src/compile-lib.ts        |  13 +-
+ lang/src/ts-compiler/src/type-check-structs.ts |  31 +++-
+ lang/src/ts-compiler/src/type-check.ts         |  20 ++-
+ lang/src/ts-compiler/src/type-defaults.ts      |  28 ++++
+ lang/src/ts-compiler/tests/run-unit-tests.js   | 195 ++++++++++++++++++++++++-
+ 8 files changed, 443 insertions(+), 14 deletions(-)

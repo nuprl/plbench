@@ -1,0 +1,89 @@
+#!/usr/bin/env node
+/*
+  /app/typecheck-example FILE.arr
+
+  Type-checks a single Pyret program with the modified TypeScript compiler
+  in /app/pyret-lang/lang (see DESIGN.md for what "type-checks" means here:
+  the standard bidirectional checker in type-check.ts, plus the additional
+  table-schema checker in table-check.ts). Exits 0 if FILE.arr has no type
+  error, non-zero (and prints the error(s) to stderr) otherwise.
+
+  This bypasses the pyret.js CLI's `-build`/`-type-check` flags directly
+  (see DESIGN.md, "Implementation strategy" -- the CLI's own `-build` path
+  has a pre-existing, documented bug where it never reports compile errors:
+  cli-module-loader.ts's comment "loadables are module-as-string values, so
+  CS.is-err never matches"). Instead this calls the same compile-lib.ts
+  entry point (CLI.compile) the CLI itself uses, and inspects each
+  loadable's own CS.CompileResult directly.
+*/
+
+const path = require('path');
+const fs = require('fs');
+
+const PYRET_LANG = path.join(__dirname, 'pyret-lang', 'lang');
+const BUILD = path.join(PYRET_LANG, 'build', 'ts-compiler');
+
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length !== 1) {
+    process.stderr.write('usage: typecheck-example FILE.arr\n');
+    process.exit(2);
+  }
+  const file = path.resolve(args[0]);
+  if (!fs.existsSync(file)) {
+    process.stderr.write('typecheck-example: no such file: ' + file + '\n');
+    process.exit(2);
+  }
+
+  // The compiler's builtin-module search paths (locators/builtin.ts) and
+  // several CompileOptions defaults (compiledCache, deps file, ...) are
+  // relative to this directory by convention -- exactly like running
+  // `node build/ts-compiler/pyret.js ...` from `lang/` on the command line
+  // (see README.type-check). Resolve FILE.arr to an absolute path first
+  // (above), then adopt that convention here too, rather than duplicating
+  // pyret.ts's path setup.
+  process.chdir(PYRET_LANG);
+
+  const CLI = require(path.join(BUILD, 'cli-module-loader.js'));
+  const CS = require(path.join(BUILD, 'compile-structs.js'));
+  const RED = require(path.join(BUILD, 'render-error-display.js'));
+  const SHARED = require(path.join(BUILD, 'shared.js'));
+
+  const options = {
+    ...CS.makeDefaultCompileOptions(PYRET_LANG),
+    typeCheck: true,
+    checks: 'none',
+    compileModule: false,
+    displayProgress: false,
+  };
+
+  let result;
+  try {
+    result = await CLI.compile(file, options);
+  } catch (e) {
+    process.stderr.write('typecheck-example: internal error: ' + (e && e.stack ? e.stack : String(e)) + '\n');
+    process.exit(2);
+    return;
+  }
+
+  let hadError = false;
+  for (const loadable of result.loadables) {
+    const cr = loadable.resultPrinter;
+    if (CS.isErr(cr)) {
+      hadError = true;
+      for (const err of cr.problems) {
+        process.stdout.write(RED.displayToString(err.renderReason(), SHARED.toRepr, []));
+        process.stdout.write('\n\n');
+      }
+    }
+  }
+
+  if (hadError) {
+    process.stdout.write('There were type errors.\n');
+    process.exit(1);
+  } else {
+    process.exit(0);
+  }
+}
+
+main();
