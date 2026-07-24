@@ -2,7 +2,7 @@ schema_version = "1.3"
 artifacts = ["/app"]
 
 [task]
-name = "chibicc/memory-safety"
+name = "plbench/memory-safety"
 description = "Add spatial and temporal memory safety to chibicc"
 keywords = ["compilers", "c", "memory-safety", "chibicc"]
 [[task.authors]]

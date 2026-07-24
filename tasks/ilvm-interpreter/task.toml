@@ -2,7 +2,7 @@ schema_version = "1.3"
 artifacts = []
 
 [task]
-name = "ilvm/ilvm-interpreter"
+name = "plbench/ilvm-interpreter"
 description = "Implement an interpreter for a small, WebAssembly-like virtual machine"
 keywords = ["programming-languages", "interpreter", "ilvm"]
 [[task.authors]]

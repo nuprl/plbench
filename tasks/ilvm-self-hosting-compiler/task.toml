@@ -2,7 +2,7 @@ schema_version = "1.3"
 artifacts = []
 
 [task]
-name = "nuprl/ilvm-self-hosting-compiler"
+name = "plbench/ilvm-self-hosting-compiler"
 description = "Write a self-hosting Scheme-to-ILVM compiler"
 keywords = ["programming-languages", "self-hosting", "ilvm", "scheme", "compilers"]
 

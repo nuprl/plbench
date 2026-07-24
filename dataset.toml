@@ -14,5 +14,6 @@ tasks = [
   { path = "tasks/gradual-type-migration" },
   { path = "tasks/ilvm-interpreter" },
   { path = "tasks/ilvm-self-hosting-compiler" },
+  { path = "tasks/lean_cbv_lc_termination" },
   { path = "tasks/scheme-typeinf" },
 ]
