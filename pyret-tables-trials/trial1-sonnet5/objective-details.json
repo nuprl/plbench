@@ -1,0 +1,41 @@
+{
+  "objective": 1,
+  "checks": {
+    "deliverable:typecheck-example": {
+      "passed": true,
+      "detail": "/app/typecheck-example"
+    },
+    "deliverable:typed-examples": {
+      "passed": true,
+      "detail": "6 example(s)"
+    },
+    "deliverable:DESIGN.md": {
+      "passed": true,
+      "detail": "/app/DESIGN.md"
+    },
+    "build:ts-compiler": {
+      "passed": true,
+      "detail": "built"
+    },
+    "probes:positive-accepted": {
+      "passed": true,
+      "detail": "6 well-typed programs must be accepted"
+    },
+    "probes:negative-rejected": {
+      "passed": true,
+      "detail": "8 ill-typed programs must be rejected"
+    },
+    "examples:type-check": {
+      "passed": true,
+      "detail": "all 6 example(s) must type-check under the wrapper"
+    },
+    "examples:exercise-tables": {
+      "passed": true,
+      "detail": "each example must use real table operations"
+    },
+    "regression:ts-type-check-test": {
+      "passed": true,
+      "detail": "passed"
+    }
+  }
+}

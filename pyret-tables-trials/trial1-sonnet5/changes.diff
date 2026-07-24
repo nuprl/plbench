@@ -1,0 +1,2122 @@
+diff --git a/lang/Makefile b/lang/Makefile
+index c13d5163a..dc4c67526 100644
+--- a/lang/Makefile
++++ b/lang/Makefile
+@@ -429,7 +429,7 @@ ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
+ 	$(NODE) tests/pyret/main2-ts.jarr
+ 
+ .PHONY : ts-test
+-ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test
++ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test ts-table-types-test
+ 
+ .PHONY : ts-clean
+ ts-clean:
+@@ -473,6 +473,12 @@ ts-type-check-test: ts-compiler tests/type-check/main-ts.jarr
+ ts-io-test: ts-compiler
+ 	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-ts.test.js"
+ 
++# Table type-checking fixtures (src/ts-compiler/tests/table-types/{good,bad}):
++# every program under good/ must type-check, every program under bad/ must not.
++.PHONY : ts-table-types-test
++ts-table-types-test: ts-compiler
++	$(NODE) src/ts-compiler/tests/table-types-test.js
++
+ tests/pyret/all-ts.jarr: ts-compiler $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
+ 	$(TS_TEST_BUILD) \
+ 		--build-runnable tests/all.arr \
+diff --git a/lang/package-lock.json b/lang/package-lock.json
+index a16f612e6..dc6f63168 100644
+--- a/lang/package-lock.json
++++ b/lang/package-lock.json
+@@ -42,6 +42,9 @@
+       "devDependencies": {
+         "http-server": "^14.1.1",
+         "jest": "^30.0.4"
++      },
++      "engines": {
++        "node": ">=22.12.0"
+       }
+     },
+     "node_modules/@babel/code-frame": {
+diff --git a/lang/src/arr/trove/ast.arr b/lang/src/arr/trove/ast.arr
+index 0a2d26a97..f66cc6525 100644
+--- a/lang/src/arr/trove/ast.arr
++++ b/lang/src/arr/trove/ast.arr
+@@ -1242,10 +1242,29 @@ data Expr:
+         PP.flow-map(PP.hardline, _.tosource(), self.extensions),
+         str-end)
+     end
+-    # s-table-update not yet implemented
+   | s-table-update(l :: Loc,
+       column-binds :: ColumnBinds,
+-      updates :: List<Member>)
++      updates :: List<Member>) with:
++    method label(self): "s-table-update" end,
++    method tosource(self):
++      maybe-using =
++        cases(List) self.column-binds.binds:
++          | empty => empty
++          | link(_, _) => link(str-using,
++              [list: PP.flow-map(PP.commabreak, _.tosource(),
++                  self.column-binds.binds) + str-colon])
++        end
++      tbl-src =
++        cases(List) maybe-using:
++          | empty => self.column-binds.table.tosource() + str-colon
++          | link(_,_) => self.column-binds.table.tosource()
++        end
++      header = PP.flow([list: str-transform, tbl-src] + maybe-using)
++      PP.surround(INDENT, 1,
++        header,
++        PP.separate(PP.commabreak, self.updates.map(_.tosource())),
++        str-end)
++    end
+   | s-table-select(l :: Loc,
+       columns :: List<Name>,
+       table   :: Expr) with:
+@@ -1529,7 +1548,11 @@ data TableExtendField:
+         if is-a-blank(self.ann):
+           PP.mt-doc
+         else:
+-          str-coloncolon + self.ann.tosource()
++          # A space is required before "::"; "name::Ann" and "name ::Ann"
++          # both fail to re-parse (confirmed with a minimal `x::Number = 5`
++          # repro), so this cannot reuse str-coloncolon bare the way it's
++          # (incorrectly) used elsewhere -- see DESIGN.md's "Bugs found".
++          PP.str(" :: ") + self.ann.tosource()
+         end
+       PP.nest(INDENT, name-part + maybe-ann + str-colonspace + self.value.tosource())
+     end
+@@ -1541,7 +1564,11 @@ data TableExtendField:
+         if is-a-blank(self.ann):
+           PP.mt-doc
+         else:
+-          str-coloncolon + self.ann.tosource()
++          # A space is required before "::"; "name::Ann" and "name ::Ann"
++          # both fail to re-parse (confirmed with a minimal `x::Number = 5`
++          # repro), so this cannot reuse str-coloncolon bare the way it's
++          # (incorrectly) used elsewhere -- see DESIGN.md's "Bugs found".
++          PP.str(" :: ") + self.ann.tosource()
+         end
+       col-part = self.col.tosource()
+       PP.nest(INDENT, name-part + maybe-ann + str-colonspace + self.reducer.tosource() + PP.str(" ") + str-of + col-part)
+diff --git a/lang/src/ts-compiler/src/ast-util.ts b/lang/src/ts-compiler/src/ast-util.ts
+index aa480050a..c4d4d0836 100644
+--- a/lang/src/ts-compiler/src/ast-util.ts
++++ b/lang/src/ts-compiler/src/ast-util.ts
+@@ -1546,6 +1546,10 @@ export function canonicalizeNames(typ: T.Type, uri: URI, transformName: NameChan
+     case 't-bot': return new T.TBot(typ.l, typ.inferred);
+     case 't-record':
+       return new T.TRecord(canonicalizeMembers(typ.fields, uri, transformName), typ.l, typ.inferred);
++    case 't-table':
++      return new T.TTable(canonicalizeMembers(typ.row, uri, transformName), typ.l, typ.inferred);
++    case 't-row':
++      return new T.TRow(canonicalizeMembers(typ.row, uri, transformName), typ.l, typ.inferred);
+     case 't-forall': return new T.TForall(typ.introduces.map(c), c(typ.onto), typ.l, typ.inferred);
+     case 't-ref': return new T.TRef(c(typ.typ), typ.l, typ.inferred);
+     case 't-data-refinement':
+diff --git a/lang/src/ts-compiler/src/ast.ts b/lang/src/ts-compiler/src/ast.ts
+index dd81088c3..33027ed09 100644
+--- a/lang/src/ts-compiler/src/ast.ts
++++ b/lang/src/ts-compiler/src/ast.ts
+@@ -2009,11 +2009,25 @@ export class STableExtend extends ExprBase {
+   }
+ }
+ 
+-// s-table-update not yet implemented (no label/tosource in ast.arr)
+ export class STableUpdate extends ExprBase {
+   get $name(): 's-table-update' { return 's-table-update'; }
+   constructor(public l: Loc, public columnBinds: ColumnBinds, public updates: Member[]) { super(); }
+   visit(visitor: any): any { return visitor.sTableUpdate(this); }
++  label(): string { return 's-table-update'; }
++  tosource(): any {
++    const maybeUsing: any[] =
++      this.columnBinds.binds.length === 0 ? []
++      : [strUsing, PP.flowMap(PP.commabreak, (b: Bind) => b.tosource(),
++          this.columnBinds.binds).append(strColon)];
++    const tblSrc =
++      maybeUsing.length === 0 ? this.columnBinds.table.tosource().append(strColon)
++      : this.columnBinds.table.tosource();
++    const header = PP.flow([strTransform, tblSrc, ...maybeUsing]);
++    return PP.surround(INDENT, 1,
++      header,
++      PP.separate(PP.commabreak, this.updates.map((m) => m.tosource())),
++      strEnd);
++  }
+ }
+ 
+ export class STableSelect extends ExprBase {
+@@ -2532,7 +2546,10 @@ export class STableExtendField extends TableExtendFieldBase {
+     const namePart = PP.str(this.name);
+     const maybeAnn =
+       isABlank(this.ann) ? PP.mtDoc
+-      : strColoncolon.append(this.ann.tosource());
++      // A space is required before "::"; "name::Ann" fails to re-parse
++      // (confirmed with a minimal `x::Number = 5` repro) -- see
++      // DESIGN.md's "Bugs found".
++      : PP.str(' :: ').append(this.ann.tosource());
+     return PP.nest(INDENT, namePart.append(maybeAnn).append(strColonspace).append(this.value.tosource()));
+   }
+ }
+@@ -2547,7 +2564,10 @@ export class STableExtendReducer extends TableExtendFieldBase {
+     const namePart = PP.str(this.name);
+     const maybeAnn =
+       isABlank(this.ann) ? PP.mtDoc
+-      : strColoncolon.append(this.ann.tosource());
++      // A space is required before "::"; "name::Ann" fails to re-parse
++      // (confirmed with a minimal `x::Number = 5` repro) -- see
++      // DESIGN.md's "Bugs found".
++      : PP.str(' :: ').append(this.ann.tosource());
+     const colPart = this.col.tosource();
+     return PP.nest(INDENT, namePart.append(maybeAnn).append(strColonspace).append(this.reducer.tosource()).append(PP.str(' ')).append(strOf).append(colPart));
+   }
+diff --git a/lang/src/ts-compiler/src/compile-errors.ts b/lang/src/ts-compiler/src/compile-errors.ts
+index 729c19620..09291914e 100644
+--- a/lang/src/ts-compiler/src/compile-errors.ts
++++ b/lang/src/ts-compiler/src/compile-errors.ts
+@@ -2663,6 +2663,38 @@ export class LoadTableNoBody extends CompileErrorBase {
+   }
+ }
+ 
++export class LoadTableColumnNeedsAnnotation extends CompileErrorBase {
++  get $name(): 'load-table-column-needs-annotation' { return 'load-table-column-needs-annotation'; }
++  constructor(public colName: string, public colLoc: Loc) { super(); }
++  renderFancyReason(): ED.ErrorDisplay {
++    return error([
++      para([
++        text("The column "),
++        highlight(text(this.colName), [this.colLoc], 0),
++        text(" of this "),
++        code(text("load-table")),
++        text(" has no annotation. Because the data in a loaded table comes from "
++            + "outside the program, the type checker cannot guess its sort: give "
++            + "the column a "),
++        code(text(":: Ann")),
++        text(" annotation.")])]);
++  }
++  renderReason(): ED.ErrorDisplay {
++    return error([
++      para([
++        text("The column "),
++        code(text(this.colName)),
++        text(" at "), edLoc(this.colLoc),
++        text(" has no annotation. Because the data in a loaded table comes from "
++            + "outside the program, the type checker cannot guess its sort; give "
++            + "the column a "),
++        code(text(":: Ann")),
++        text(" annotation, e.g. "),
++        code(text(this.colName + " :: String")),
++        text(".")])]);
++  }
++}
++
+ export type CompileError =
+   | WfErr
+   | WfEmptyBlock
+@@ -2750,8 +2782,10 @@ export type CompileError =
+   | TableSanitizerBadColumn
+   | LoadTableBadNumberSrcs
+   | LoadTableDuplicateSanitizer
+-  | LoadTableNoBody;
++  | LoadTableNoBody
++  | LoadTableColumnNeedsAnnotation;
+ 
++export function isLoadTableColumnNeedsAnnotation(x: any): x is LoadTableColumnNeedsAnnotation { return x instanceof LoadTableColumnNeedsAnnotation; }
+ export function isWfErr(x: any): x is WfErr { return x instanceof WfErr; }
+ export function isWfEmptyBlock(x: any): x is WfEmptyBlock { return x instanceof WfEmptyBlock; }
+ export function isWfErrSplit(x: any): x is WfErrSplit { return x instanceof WfErrSplit; }
+diff --git a/lang/src/ts-compiler/src/desugar-post-tc.ts b/lang/src/ts-compiler/src/desugar-post-tc.ts
+index 6828194b6..8aa886b36 100644
+--- a/lang/src/ts-compiler/src/desugar-post-tc.ts
++++ b/lang/src/ts-compiler/src/desugar-post-tc.ts
+@@ -7,7 +7,8 @@ import * as A from './ast';
+ import * as D from './desugar';
+ import * as C from './compile-structs';
+ import { DefaultMapVisitor } from './ast-visitors';
+-import { Loc } from './srcloc';
++import { Loc, dummyLoc } from './srcloc';
++import { partition } from './shared';
+ 
+ export const mkId = D.mkId;
+ export const noBranchesExn = D.noBranchesExn;
+@@ -17,6 +18,21 @@ export function noCasesExn(l: Loc, val: A.Expr): A.Expr {
+   return new A.SPrimApp(l, 'throwNoCasesMatched', [new A.SSrcloc(l, l), val], flatPrimApp);
+ }
+ 
++// columnBinds.binds are Binds whose OWN identifier IS the column name (see
++// desugar.ts's original s-table-extend/update/filter cases, and
++// well-formed.ts's TableReducerBadColumn, which rely on the same
++// convention). type-check.ts's table cases type-check against that
++// convention; this helper re-derives the {name; idx; val} triples the
++// lowering below needs, exactly as desugar.ts used to compute them inline.
++function columnBindTriples(binds: A.Bind[]): { name: A.SStr; l: Loc; idx: D.MkId; val: { idB: A.Bind; idE: A.SId } }[] {
++  return binds.map((c) => ({
++    name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
++    l: c.l,
++    idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
++    val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) },
++  }));
++}
++
+ class DesugarVisitor extends DefaultMapVisitor {
+   sTemplate(node: A.STemplate): A.Expr {
+     return new A.SPrimApp(node.l, 'throwUnfinishedTemplate', [new A.SSrcloc(node.l, node.l)], flatPrimApp);
+@@ -44,6 +60,290 @@ class DesugarVisitor extends DefaultMapVisitor {
+   sCheck(node: A.SCheck): A.Expr {
+     return new A.SId(node.l, new A.SGlobal('nothing'));
+   }
++
++  // ---------- Table forms ----------
++  // Lowering to makeTable/raw-array primitives, moved verbatim (modulo
++  // recursing via `.visit(this)` instead of a separate desugarExpr pass)
++  // from desugar.ts's former s-table*/s-load-table cases -- see the comment
++  // there and DESIGN.md. Running these post-type-check (rather than
++  // pre-type-check, as this file historically did) is what lets
++  // type-check.ts see s-table*/s-load-table nodes directly and check column
++  // shapes; the primitives produced here are byte-for-byte what desugar.ts
++  // used to produce, so generated code is unchanged.
++
++  sTable(node: A.STable): A.Expr {
++    const l = dummyLoc;
++    const columnNames = node.headers.map((header) => new A.SStr(header.l, header.name));
++    const anns = node.headers.map((header) => header.ann);
++    const rows = node.rows.map((row) => {
++      const elems = row.elems.map((elem, n) => D.checkAnn(elem.l, elem.visit(this), anns[n]));
++      return new A.SArray(l, elems);
++    });
++    return new A.SPrimApp(l, 'makeTable',
++      [new A.SArray(l, columnNames), new A.SArray(l, rows)], flatPrimApp);
++  }
++
++  sLoadTable(node: A.SLoadTable): A.Expr {
++    const l = node.l;
++    const dummy = dummyLoc;
++    let src: A.Expr | undefined;
++    let sanitizers: A.Expr[] = [];
++    for (const s of node.spec) {
++      switch (s.$name) {
++        case 's-sanitize': {
++          const asOption = new A.SApp(l, D.bid(l, 'as-loader-option'),
++            [new A.SStr(dummy, 'sanitizer'), new A.SStr(dummy, s.name.toname()), s.sanitizer.visit(this)]);
++          sanitizers = [asOption, ...sanitizers];
++          break;
++        }
++        case 's-table-src':
++          src = s.src.visit(this);
++          break;
++      }
++    }
++    if (src === undefined) {
++      throw new Error('s-load-table missing source: Well-formedness should have failed');
++    }
++    const loaded = new A.SApp(l, new A.SDot(l, src, 'load'),
++      [new A.SArray(dummy, node.headers.map((h) => new A.SStr(l, h.name))), new A.SArray(dummy, sanitizers)]);
++    return new A.SApp(l, D.bid(l, 'open-table'), [loaded]);
++  }
++
++  sTableExtend(node: A.STableExtend): A.Expr {
++    const l = node.l;
++    const columnBinds = node.columnBinds;
++    const extensions = node.extensions;
++    const row = mkId(dummyLoc, 'row');
++    const tbl = mkId(dummyLoc, 'table');
++
++    const columns = columnBindTriples(columnBinds.binds);
++
++    const splitExts = partition(A.isSTableExtendReducer, extensions);
++    const reducerExts = splitExts.isTrue as A.STableExtendReducer[];
++
++    const mkReducerAnn = (loc: Loc, retType: A.Ann): A.Ann => {
++      const one = new A.AField(loc, 'one', new A.AArrow(loc, [new A.AAny(loc)], retType, true));
++      const reduce = new A.AField(loc, 'reduce',
++        new A.AArrow(loc, [retType, new A.AAny(loc)], retType, true));
++      return new A.ARecord(loc, [one, reduce]);
++    };
++
++    const reducers = new Map<string, D.MkId>();
++    const accs = new Map<string, D.MkIdVar>();
++    for (const extension of reducerExts) {
++      const reducerId = D.mkIdAnn(dummyLoc, 'reducer' + extension.name, mkReducerAnn(extension.l, extension.ann));
++      const accId = D.mkIdVar(dummyLoc, 'acc' + extension.name);
++      reducers.set(extension.name, reducerId);
++      accs.set(extension.name, accId);
++    }
++
++    let initializedReducers: A.LetBind[] | undefined;
++    if (reducerExts.length === 0) {
++      initializedReducers = undefined;
++    } else {
++      let reducersAcc: A.LetBind[] = [];
++      for (const ext of reducerExts) {
++        const l2 = ext.l;
++        const reducer = reducers.get(ext.name)!;
++        const acc = accs.get(ext.name)!;
++        const nothingExpr = new A.SId(l2, new A.SGlobal('nothing'));
++        reducersAcc = [
++          new A.SLetBind(l2, reducer.idB, ext.reducer.visit(this)),
++          new A.SVarBind(l2, acc.idB, nothingExpr),
++          ...reducersAcc,
++        ];
++      }
++      initializedReducers = [...reducersAcc].reverse();
++    }
++
++    const withInitializedReducers = (body: A.Expr): A.Expr =>
++      initializedReducers === undefined ? body : new A.SLetExpr(dummyLoc, initializedReducers, body, true);
++
++    const processExtension = (isFirst: boolean) => (extension: A.TableExtendField): A.Expr => {
++      switch (extension.$name) {
++        case 's-table-extend-field': return extension.value.visit(this);
++        case 's-table-extend-reducer': {
++          const l2 = extension.l;
++          const name = extension.name;
++          const col = extension.col;
++          const reducer = reducers.get(name)!;
++          const acc = accs.get(name)!;
++          const accIdE = new A.SIdVar(acc.idE.l, acc.idE.id);
++          const found = columns.find((x) => x.name.s === (col as A.SName).s);
++          const colId = found === undefined
++            ? { id: col, idB: new A.SBind(l2, false, col, A.aBlank), idE: new A.SId(l2, col) }
++            : found.val;
++          if (isFirst) {
++            return new A.SBlock(dummyLoc, [
++              new A.SAssign(l2, acc.id, new A.SApp(l2, new A.SDot(l2, reducer.idE, 'one'), [colId.idE])),
++              new A.STupleGet(l2, accIdE, 1, l2),
++            ]);
++          } else {
++            return new A.SBlock(dummyLoc, [
++              new A.SAssign(l2, acc.id,
++                new A.SApp(l2, new A.SDot(l2, reducer.idE, 'reduce'), [new A.STupleGet(l2, accIdE, 0, l2), colId.idE])),
++              new A.STupleGet(l2, accIdE, 1, l2),
++            ]);
++          }
++        }
++      }
++    };
++
++    const dataPopMapfun = (first: boolean): A.Expr =>
++      new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
++        new A.SLetExpr(dummyLoc,
++          columns.map((column) =>
++            new A.SLetBind(dummyLoc, column.val.idB,
++              new A.SPrimApp(dummyLoc, 'raw_array_get', [row.idE, column.idx.idE], flatPrimApp))),
++          new A.SPrimApp(dummyLoc, 'raw_array_concat',
++            [row.idE, new A.SArray(dummyLoc, extensions.map(processExtension(first)))], flatPrimApp), true),
++        undefined, undefined, true);
++
++    const binds: A.LetBind[] = [
++      new A.SLetBind(dummyLoc, tbl.idB, D.checkTable(columnBinds.table.l, columnBinds.table.visit(this), (t) => t)),
++      ...columns.map((column) =>
++        new A.SLetBind(dummyLoc, column.idx.idB, D.getTableColumn(l, columnBinds.table.l, tbl.idE, column))),
++    ];
++    const body = new A.SBlock(dummyLoc, [
++      new A.SBlock(dummyLoc, extensions.map((extension) =>
++        D.checkNoColumn(l, tbl.idE, columnBinds.l, extension.name, extension.l))),
++      new A.SPrimApp(dummyLoc, 'makeTable', [
++        new A.SPrimApp(dummyLoc, 'raw_array_concat',
++          [new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
++            new A.SArray(dummyLoc, extensions.map((e) => new A.SStr(e.l, e.name)))], flatPrimApp),
++        withInitializedReducers(
++          new A.SApp(l, new A.SId(l, new A.SGlobal('raw-array-map-1')),
++            [dataPopMapfun(true), dataPopMapfun(false), new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])),
++      ], flatPrimApp),
++    ]);
++    return new A.SLetExpr(dummyLoc, binds, body, true);
++  }
++
++  sTableUpdate(node: A.STableUpdate): A.Expr {
++    const l = node.l;
++    const columnBinds = node.columnBinds;
++    const row = mkId(dummyLoc, 'row');
++    const newRow = mkId(dummyLoc, 'new-row-row');
++    const tbl = mkId(l, 'table');
++
++    const columns = columnBindTriples(columnBinds.binds);
++
++    const updates = node.updates.map((u) => ({
++      name: new A.SStr(dummyLoc, u.name),
++      l: u.l,
++      idx: mkId(dummyLoc, u.name),
++      val: (u as A.SDataField).value.visit(this),
++    }));
++
++    const binds: A.LetBind[] = [
++      new A.SLetBind(dummyLoc, tbl.idB, D.checkTable(columnBinds.table.l, columnBinds.table.visit(this), (t) => t)),
++      ...columns.map((column) =>
++        new A.SLetBind(dummyLoc, column.idx.idB, D.getTableColumn(l, columnBinds.table.l, tbl.idE, column))),
++      ...updates.map((update) =>
++        new A.SLetBind(dummyLoc, update.idx.idB, D.getTableColumn(l, columnBinds.table.l, tbl.idE, update))),
++    ];
++    const body = new A.SPrimApp(dummyLoc, 'makeTable', [
++      new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
++      new A.SApp(l, new A.SId(dummyLoc, D.g('raw-array-map')), [
++        new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
++          new A.SLetExpr(dummyLoc, [
++            new A.SLetBind(dummyLoc, newRow.idB,
++              new A.SPrimApp(dummyLoc, 'raw_array_concat', [row.idE, new A.SArray(dummyLoc, [])], flatPrimApp)),
++            ...columns.map((column) =>
++              new A.SLetBind(dummyLoc, column.val.idB,
++                new A.SPrimApp(dummyLoc, 'raw_array_get', [newRow.idE, column.idx.idE], flatPrimApp))),
++          ],
++          new A.SLetExpr(dummyLoc,
++            updates.map((update) =>
++              new A.SLetBind(dummyLoc, newRow.idB,
++                new A.SPrimApp(dummyLoc, 'raw_array_set', [newRow.idE, update.idx.idE, update.val], flatPrimApp))),
++            newRow.idE, true), true), undefined, undefined, true),
++        new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')]),
++    ], flatPrimApp);
++    return new A.SLetExpr(dummyLoc, binds, body, true);
++  }
++
++  sTableSelect(node: A.STableSelect): A.Expr {
++    const l = node.l;
++    const row = mkId(dummyLoc, 'row');
++    const tbl = mkId(l, 'table');
++    const columns = node.columns.map((c) => ({
++      l: (c as A.SName).l,
++      idx: mkId((c as A.SName).l, (c as A.SName).s),
++      name: new A.SStr((c as A.SName).l, (c as A.SName).s),
++    }));
++    const binds: A.LetBind[] = [
++      new A.SLetBind(dummyLoc, tbl.idB, D.checkTable(node.table.l, node.table.visit(this), (t) => t)),
++      ...columns.map((column) =>
++        new A.SLetBind(dummyLoc, column.idx.idB, D.getTableColumn(l, node.table.l, tbl.idE, column))),
++    ];
++    const body = new A.SPrimApp(dummyLoc, 'makeTable', [
++      new A.SArray(dummyLoc, columns.map((c) => c.name)),
++      new A.SApp(l, new A.SId(dummyLoc, D.g('raw-array-map')), [
++        new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
++          new A.SArray(dummyLoc, columns.map((c) =>
++            new A.SPrimApp(dummyLoc, 'raw_array_get', [row.idE, c.idx.idE], flatPrimApp))), undefined, undefined, true),
++        new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')]),
++    ], flatPrimApp);
++    return new A.SLetExpr(dummyLoc, binds, body, true);
++  }
++
++  sTableExtract(node: A.STableExtract): A.Expr {
++    const l = node.l;
++    const column = node.column;
++    const table = node.table;
++    const tbl = mkId(table.l, 'table');
++    const col = mkId(dummyLoc, (column as A.SName).s);
++    const row = mkId(dummyLoc, (column as A.SName).s);
++    return new A.SLetExpr(dummyLoc, [
++      new A.SLetBind(dummyLoc, tbl.idB, D.checkTable(table.l, table.visit(this), (t) => t)),
++      new A.SLetBind(dummyLoc, col.idB,
++        D.getTableColumn(l, table.l, tbl.idE, { l: (column as A.SName).l, name: new A.SStr(dummyLoc, (column as A.SName).s) })),
++    ],
++    new A.SPrimApp(dummyLoc, 'raw_array_to_list', [
++      new A.SApp(l, new A.SId(dummyLoc, D.g('raw-array-map')), [
++        new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
++          new A.SPrimApp(dummyLoc, 'raw_array_get', [row.idE, col.idE], flatPrimApp), undefined, undefined, true),
++        new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')]),
++    ], flatPrimApp), true);
++  }
++
++  sTableOrder(node: A.STableOrder): A.Expr {
++    const l = node.l;
++    const orderingRawArr = node.ordering.map((o) =>
++      new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, (o.column as A.SName).s)]));
++    return new A.SApp(l, new A.SDot(dummyLoc, node.table.visit(this), 'multi-order'), [new A.SArray(dummyLoc, orderingRawArr)]);
++  }
++
++  sTableFilter(node: A.STableFilter): A.Expr {
++    const l = node.l;
++    const columnBinds = node.columnBinds;
++    const predicate = node.predicate;
++    const row = mkId(dummyLoc, 'row');
++    const tbl = mkId(l, 'table');
++    const predRes = D.mkIdAnn(predicate.l, 'pred', new A.AName(predicate.l, new A.STypeGlobal('Boolean')));
++
++    const columns = columnBindTriples(columnBinds.binds);
++
++    const binds: A.LetBind[] = [
++      new A.SLetBind(dummyLoc, tbl.idB, D.checkTable(columnBinds.table.l, columnBinds.table.visit(this), (t) => t)),
++      ...columns.map((column) =>
++        new A.SLetBind(dummyLoc, column.idx.idB, D.getTableColumn(l, columnBinds.table.l, tbl.idE, column))),
++    ];
++    const body = new A.SPrimApp(dummyLoc, 'makeTable', [
++      new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
++      new A.SApp(l, new A.SId(dummyLoc, D.g('raw-array-filter')), [
++        new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
++          new A.SLetExpr(dummyLoc,
++            columns.map((column) =>
++              new A.SLetBind(dummyLoc, column.val.idB,
++                new A.SPrimApp(dummyLoc, 'raw_array_get', [row.idE, column.idx.idE], flatPrimApp))),
++            new A.SLetExpr(dummyLoc, [new A.SLetBind(predicate.l, predRes.idB, predicate.visit(this))],
++              predRes.idE, true), true), undefined, undefined, true),
++        new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')]),
++    ], flatPrimApp);
++    return new A.SLetExpr(dummyLoc, binds, body, true);
++  }
+ }
+ 
+ export const desugarVisitor = new DesugarVisitor();
+diff --git a/lang/src/ts-compiler/src/desugar.ts b/lang/src/ts-compiler/src/desugar.ts
+index 38206d1d5..5c78da8f2 100644
+--- a/lang/src/ts-compiler/src/desugar.ts
++++ b/lang/src/ts-compiler/src/desugar.ts
+@@ -585,17 +585,23 @@ export function desugarExpr(expr: A.Expr): A.Expr {
+       }
+       return new A.SPrimApp(l, 'makeReactor', [desugarExpr(init), new A.SObj(l, optionFields)], flatPrimApp);
+     }
++    // Table forms (s-table, s-load-table, s-table-extend, s-table-update,
++    // s-table-select, s-table-order, s-table-filter, s-table-extract) are
++    // deliberately NOT lowered here. Lowering to makeTable/raw-array
++    // primitives (as this file used to do -- see git history) erases column
++    // names to runtime string literals before the type checker ever runs,
++    // which made static column-shape checking impossible. Instead, these
++    // nodes survive desugar.ts structurally (recursively desugaring only
++    // their non-table subexpressions), type-check.ts gained cases for them
++    // (see the `s-table*` cases in _synthesis/_checking), and the actual
++    // lowering -- byte-for-byte the same primitives this file used to
++    // produce -- now happens afterwards, in desugar-post-tc.ts. Final
++    // generated code is unchanged; only the timing of this rewrite moved
++    // relative to type checking. See DESIGN.md for the full rationale.
+     case 's-table': {
+-      const l = dummyLoc; // shadow l = A.dummy-loc
+-      const columnNames = expr.headers.map((header) => new A.SStr(header.l, header.name));
+-      const anns = expr.headers.map((header) => desugarAnn(header.ann));
+-      const rows = expr.rows.map((row) => {
+-        const elems = row.elems.map((elem, n) => checkAnn(elem.l, desugarExpr(elem), anns[n]));
+-        return new A.SArray(l, elems);
+-      });
+-      return new A.SPrimApp(l, 'makeTable',
+-        [new A.SArray(l, columnNames),
+-          new A.SArray(l, rows)], flatPrimApp);
++      const headers = expr.headers.map((header) => new A.SFieldName(header.l, header.name, desugarAnn(header.ann)));
++      const rows = expr.rows.map((row) => new A.STableRow(row.l, row.elems.map((elem) => desugarExpr(elem))));
++      return new A.STable(expr.l, headers, rows);
+     }
+     case 's-paren': return desugarExpr(expr.expr);
+     // NOTE(john): see preconditions; desugar-scope should have already happened
+@@ -608,341 +614,44 @@ export function desugarExpr(expr: A.Expr): A.Expr {
+       return new A.SCheckTest(expr.l, expr.op, desugarOpt(desugarExpr, expr.refinement),
+         desugarExpr(expr.left), desugarOpt(desugarExpr, expr.right), desugarOpt(desugarExpr, expr.cause));
+     case 's-load-table': {
+-      const l = expr.l;
+-      const dummy = dummyLoc;
+-      let src: A.Expr | undefined = undefined;
+-      let sanitizers: A.Expr[] = [];
+-      for (const s of expr.spec) {
++      const headers = expr.headers.map((header) => new A.SFieldName(header.l, header.name, desugarAnn(header.ann)));
++      const spec = expr.spec.map((s): A.LoadTableSpec => {
+         switch (s.$name) {
+-          case 's-sanitize': {
+-            // Convert to loader option
+-            const asOption = new A.SApp(l, bid(l, 'as-loader-option'),
+-              [
+-                new A.SStr(dummy, 'sanitizer'),
+-                new A.SStr(dummy, s.name.toname()),
+-                s.sanitizer
+-              ]);
+-            sanitizers = [asOption, ...sanitizers];
+-            break;
+-          }
+-          case 's-table-src':
+-            // Well-formedness ensures that this matches exactly once
+-            src = desugarExpr(s.src);
+-            break;
++          case 's-sanitize': return new A.SSanitize(s.l, s.name, desugarExpr(s.sanitizer));
++          case 's-table-src': return new A.STableSrc(s.l, desugarExpr(s.src));
+         }
+-      }
+-
+-      if (src === undefined) {
+-        return raise('s-load-table missing source: Well-formedness should have failed');
+-      }
+-
+-      const loaded = new A.SApp(l,
+-        new A.SDot(l, src, 'load'),
+-        [
+-          new A.SArray(dummy, expr.headers.map((h) => new A.SStr(l, h.name))),
+-          new A.SArray(dummy, sanitizers)
+-        ]);
+-
+-      return new A.SApp(l, bid(l, 'open-table'), [loaded]);
++      });
++      return new A.SLoadTable(expr.l, headers, spec);
+     }
+     case 's-table-extend': {
+-      // NOTE(philip): I am fairly certain that this will need to be moved
+-      //               to post-type-check desugaring, since the variables used
+-      //               by reducers is not well-typed
+-      const l = expr.l;
+-      const columnBinds = expr.columnBinds;
+-      const extensions = expr.extensions;
+-      const row = mkId(dummyLoc, 'row');
+-      const tbl = mkId(dummyLoc, 'table');
+-
+-      const columns = columnBinds.binds.map((c) => ({
+-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        l: c.l,
+-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+-      }));
+-
+-      const splitExts = partition(A.isSTableExtendReducer, extensions);
+-      const simpleExts = splitExts.isFalse;
+-      void simpleExts;
+-      const reducerExts = splitExts.isTrue as A.STableExtendReducer[];
+-
+-      const mkReducerAnn = (loc: Loc, retType: A.Ann): A.Ann => {
+-        const one = new A.AField(loc, 'one', new A.AArrow(loc, [new A.AAny(loc)], retType, true));
+-        const reduce = new A.AField(loc, 'reduce',
+-          new A.AArrow(loc, [retType, new A.AAny(loc)], retType, true));
+-        return new A.ARecord(loc, [one, reduce]);
+-      };
+-
+-      const reducers = new Map<string, MkId>();
+-      const accs = new Map<string, MkIdVar>();
+-      for (const extension of reducerExts) {
+-        const reducerId = mkIdAnn(dummyLoc,
+-          'reducer' + extension.name,
+-          mkReducerAnn(extension.l, extension.ann));
+-        const accId = mkIdVar(dummyLoc, 'acc' + extension.name);
+-        reducers.set(extension.name, reducerId);
+-        accs.set(extension.name, accId);
+-      }
+-
+-      let initializedReducers: A.LetBind[] | undefined;
+-      if (reducerExts.length === 0) {
+-        initializedReducers = undefined;
+-      } else {
+-        let reducersAcc: A.LetBind[] = [];
+-        for (const ext of reducerExts) {
+-          const l2 = ext.l;
+-          const reducer = reducers.get(ext.name)!;
+-          const acc = accs.get(ext.name)!;
+-          const nothingExpr = new A.SId(l2, new A.SGlobal('nothing'));
+-          reducersAcc = [
+-            new A.SLetBind(l2, reducer.idB, desugarExpr(ext.reducer)),
+-            new A.SVarBind(l2, acc.idB, nothingExpr),
+-            ...reducersAcc
+-          ];
+-        }
+-        initializedReducers = [...reducersAcc].reverse();
+-      }
+-
+-      const withInitializedReducers = (body: A.Expr): A.Expr =>
+-        initializedReducers === undefined ? body : new A.SLetExpr(dummyLoc, initializedReducers, body, true);
+-
+-      const processExtension = (isFirst: boolean) => (extension: A.TableExtendField): A.Expr => {
++      const columnBinds = new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds, desugarExpr(expr.columnBinds.table));
++      const extensions = expr.extensions.map((extension): A.TableExtendField => {
+         switch (extension.$name) {
+-          case 's-table-extend-field': return desugarExpr(extension.value);
+-          case 's-table-extend-reducer': {
+-            const l2 = extension.l;
+-            const name = extension.name;
+-            const col = extension.col;
+-            const reducer = reducers.get(name)!;
+-            const acc = accs.get(name)!;
+-            // Dereferenced accumulator
+-            const accIdE = new A.SIdVar(acc.idE.l, acc.idE.id);
+-            const found = columns.find((x) => x.name.s === (col as A.SName).s);
+-            // Lift from Option monad
+-            const colId = found === undefined
+-              // Dummy values; will end up unbound
+-              // (TODO: Figure out how to make only one 'unbound' error show up
+-              // since the desugaring produces the unbound column twice)
+-              ? { id: col, idB: new A.SBind(l2, false, col, A.aBlank), idE: new A.SId(l2, col) }
+-              : found.val;
+-            if (isFirst) {
+-              return new A.SBlock(dummyLoc,
+-                [
+-                  new A.SAssign(l2, acc.id,
+-                    new A.SApp(l2, new A.SDot(l2, reducer.idE, 'one'), [colId.idE])),
+-                  new A.STupleGet(l2, accIdE, 1, l2)
+-                ]);
+-            } else {
+-              return new A.SBlock(dummyLoc,
+-                [
+-                  new A.SAssign(l2, acc.id,
+-                    new A.SApp(l2, new A.SDot(l2, reducer.idE, 'reduce'),
+-                      [new A.STupleGet(l2, accIdE, 0, l2), colId.idE])),
+-                  new A.STupleGet(l2, accIdE, 1, l2)
+-                ]);
+-            }
+-          }
++          case 's-table-extend-field':
++            return new A.STableExtendField(extension.l, extension.name, desugarExpr(extension.value), desugarAnn(extension.ann));
++          case 's-table-extend-reducer':
++            return new A.STableExtendReducer(extension.l, extension.name, desugarExpr(extension.reducer), extension.col, desugarAnn(extension.ann));
+         }
+-      };
+-
+-      const dataPopMapfun = (first: boolean): A.Expr =>
+-        new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
+-          new A.SLetExpr(dummyLoc,
+-            columns.map((column) =>
+-              new A.SLetBind(dummyLoc, column.val.idB,
+-                new A.SPrimApp(dummyLoc, 'raw_array_get',
+-                  [row.idE, column.idx.idE], flatPrimApp))),
+-            new A.SPrimApp(dummyLoc, 'raw_array_concat', [
+-              row.idE,
+-              new A.SArray(dummyLoc,
+-                extensions.map(processExtension(first)))], flatPrimApp), true),
+-          undefined, undefined, true);
+-
+-      const binds: A.LetBind[] = [
+-        new A.SLetBind(dummyLoc, tbl.idB,
+-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+-        // Column Index Bindings
+-        ...columns.map((column) =>
+-          new A.SLetBind(dummyLoc, column.idx.idB,
+-            getTableColumn(l, columnBinds.table.l, tbl.idE, column)))
+-      ];
+-      // Table Construction
+-      const body = new A.SBlock(dummyLoc, [
+-        new A.SBlock(dummyLoc, extensions.map((extension) =>
+-          checkNoColumn(l, tbl.idE, columnBinds.l, extension.name, extension.l))),
+-        new A.SPrimApp(dummyLoc, 'makeTable', [
+-          // Header
+-          new A.SPrimApp(dummyLoc, 'raw_array_concat', [
+-            new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
+-            new A.SArray(dummyLoc, extensions.map((e) => new A.SStr(e.l, e.name)))],
+-          flatPrimApp),
+-          // Data
+-          withInitializedReducers(
+-            new A.SApp(l, new A.SId(l, new A.SGlobal('raw-array-map-1')), [
+-              dataPopMapfun(true),
+-              dataPopMapfun(false),
+-              new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')]))], flatPrimApp)]);
+-      return new A.SLetExpr(dummyLoc, binds, body, true);
++      });
++      return new A.STableExtend(expr.l, columnBinds, extensions);
+     }
+     case 's-table-update': {
+-      const l = expr.l;
+-      const columnBinds = expr.columnBinds;
+-      const row = mkId(dummyLoc, 'row');
+-      const newRow = mkId(dummyLoc, 'new-row-row');
+-      const tbl = mkId(l, 'table');
+-
+-      const columns = columnBinds.binds.map((c) => ({
+-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        l: c.l,
+-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+-      }));
+-
+-      const updates = expr.updates.map((u) => ({
+-        name: new A.SStr(dummyLoc, u.name),
+-        l: u.l,
+-        idx: mkId(dummyLoc, u.name),
+-        val: desugarExpr((u as A.SDataField).value)
+-      }));
+-
+-      const binds: A.LetBind[] = [
+-        new A.SLetBind(dummyLoc, tbl.idB,
+-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+-        // Column Index Bindings
+-        ...columns.map((column) =>
+-          new A.SLetBind(dummyLoc, column.idx.idB,
+-            getTableColumn(l, columnBinds.table.l, tbl.idE, column))),
+-        ...updates.map((update) =>
+-          new A.SLetBind(dummyLoc, update.idx.idB,
+-            getTableColumn(l, columnBinds.table.l, tbl.idE, update)))
+-      ];
+-      // Table Construction
+-      const body = new A.SPrimApp(dummyLoc, 'makeTable', [
+-        // Header
+-        new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
+-        // Data
+-        new A.SApp(l, new A.SId(dummyLoc, g('raw-array-map')), [
+-          new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
+-            new A.SLetExpr(dummyLoc,
+-              [
+-                new A.SLetBind(dummyLoc, newRow.idB,
+-                  new A.SPrimApp(dummyLoc, 'raw_array_concat', [
+-                    row.idE, new A.SArray(dummyLoc, [])], flatPrimApp)),
+-                ...columns.map((column) =>
+-                  new A.SLetBind(dummyLoc, column.val.idB,
+-                    new A.SPrimApp(dummyLoc, 'raw_array_get',
+-                      [newRow.idE, column.idx.idE], flatPrimApp)))
+-              ],
+-              new A.SLetExpr(dummyLoc,
+-                updates.map((update) =>
+-                  new A.SLetBind(dummyLoc, newRow.idB,
+-                    new A.SPrimApp(dummyLoc, 'raw_array_set', [
+-                      newRow.idE, update.idx.idE, update.val], flatPrimApp))),
+-                newRow.idE, true), true), undefined, undefined, true),
+-          new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])],
+-      flatPrimApp);
+-      return new A.SLetExpr(dummyLoc, binds, body, true);
++      const columnBinds = new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds, desugarExpr(expr.columnBinds.table));
++      const updates = expr.updates.map((u) => new A.SDataField(u.l, u.name, desugarExpr((u as A.SDataField).value)));
++      return new A.STableUpdate(expr.l, columnBinds, updates);
+     }
+     case 's-table-select': {
+-      const l = expr.l;
+-      const row = mkId(dummyLoc, 'row');
+-      const tbl = mkId(l, 'table');
+-      const columns = expr.columns.map((c) => ({
+-        l: (c as A.SName).l,
+-        idx: mkId((c as A.SName).l, (c as A.SName).s),
+-        name: new A.SStr((c as A.SName).l, (c as A.SName).s)
+-      }));
+-      const binds: A.LetBind[] = [
+-        new A.SLetBind(dummyLoc, tbl.idB,
+-          checkTable(expr.table.l, desugarExpr(expr.table), (t) => t)),
+-        // Column Index Bindings
+-        ...columns.map((column) =>
+-          new A.SLetBind(dummyLoc, column.idx.idB,
+-            getTableColumn(l, expr.table.l, tbl.idE, column)))
+-      ];
+-      // Table Construction
+-      const body = new A.SPrimApp(dummyLoc, 'makeTable', [
+-        // Header
+-        new A.SArray(dummyLoc, columns.map((c) => c.name)),
+-        // Data
+-        new A.SApp(l, new A.SId(dummyLoc, g('raw-array-map')), [
+-          new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
+-            new A.SArray(dummyLoc,
+-              columns.map((c) =>
+-                new A.SPrimApp(dummyLoc, 'raw_array_get',
+-                  [row.idE, c.idx.idE], flatPrimApp))), undefined, undefined, true),
+-          new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])], flatPrimApp);
+-      return new A.SLetExpr(dummyLoc, binds, body, true);
++      return new A.STableSelect(expr.l, expr.columns, desugarExpr(expr.table));
+     }
+     case 's-table-extract': {
+-      const l = expr.l;
+-      const column = expr.column;
+-      const table = expr.table;
+-      const tbl = mkId(table.l, 'table');
+-      const col = mkId(dummyLoc, (column as A.SName).s);
+-      const row = mkId(dummyLoc, (column as A.SName).s);
+-      return new A.SLetExpr(dummyLoc, [
+-        new A.SLetBind(dummyLoc, tbl.idB,
+-          checkTable(table.l, desugarExpr(table), (t) => t)),
+-        new A.SLetBind(dummyLoc, col.idB,
+-          getTableColumn(l, table.l, tbl.idE, { l: (column as A.SName).l, name: new A.SStr(dummyLoc, (column as A.SName).s) }))],
+-        // Table Construction
+-        new A.SPrimApp(dummyLoc, 'raw_array_to_list', [
+-          new A.SApp(l, new A.SId(dummyLoc, g('raw-array-map')), [
+-            new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
+-              new A.SPrimApp(dummyLoc, 'raw_array_get', [row.idE, col.idE], flatPrimApp), undefined, undefined, true),
+-            new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])], flatPrimApp), true);
++      return new A.STableExtract(expr.l, expr.column, desugarExpr(expr.table));
+     }
+     case 's-table-order': {
+-      const l = expr.l;
+-      const orderingRawArr = expr.ordering.map((o) =>
+-        new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, (o.column as A.SName).s)]));
+-      return new A.SApp(l,
+-        new A.SDot(dummyLoc, desugarExpr(expr.table), 'multi-order'),
+-        [new A.SArray(dummyLoc, orderingRawArr)]);
++      return new A.STableOrder(expr.l, desugarExpr(expr.table), expr.ordering);
+     }
+     case 's-table-filter': {
+-      const l = expr.l;
+-      const columnBinds = expr.columnBinds;
+-      const predicate = expr.predicate;
+-      const row = mkId(dummyLoc, 'row');
+-      const tbl = mkId(l, 'table');
+-      const predRes = mkIdAnn(predicate.l, 'pred', new A.AName(predicate.l, new A.STypeGlobal('Boolean')));
+-
+-      const columns = columnBinds.binds.map((c) => ({
+-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        l: c.l,
+-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+-      }));
+-
+-      const binds: A.LetBind[] = [
+-        new A.SLetBind(dummyLoc, tbl.idB,
+-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+-        // Column Index Bindings
+-        ...columns.map((column) =>
+-          new A.SLetBind(dummyLoc, column.idx.idB,
+-            getTableColumn(l, columnBinds.table.l, tbl.idE, column)))
+-      ];
+-      // Table Construction
+-      const body = new A.SPrimApp(dummyLoc, 'makeTable', [
+-        // Header
+-        new A.SDot(dummyLoc, tbl.idE, '_header-raw-array'),
+-        // Data
+-        new A.SApp(l, new A.SId(dummyLoc, g('raw-array-filter')), [
+-          new A.SLam(dummyLoc, '', [], [row.idB], A.aBlank, '',
+-            new A.SLetExpr(dummyLoc,
+-              columns.map((column) =>
+-                new A.SLetBind(dummyLoc, column.val.idB,
+-                  new A.SPrimApp(dummyLoc, 'raw_array_get',
+-                    [row.idE, column.idx.idE], flatPrimApp))),
+-              new A.SLetExpr(dummyLoc,
+-                [new A.SLetBind(predicate.l, predRes.idB, desugarExpr(predicate))],
+-                predRes.idE, true), true), undefined, undefined, true),
+-          new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])],
+-      flatPrimApp);
+-      return new A.SLetExpr(dummyLoc, binds, body, true);
++      const columnBinds = new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds, desugarExpr(expr.columnBinds.table));
++      return new A.STableFilter(expr.l, columnBinds, desugarExpr(expr.predicate));
+     }
+     case 's-spy-block': {
+       const l = expr.l;
+diff --git a/lang/src/ts-compiler/src/type-check-structs.ts b/lang/src/ts-compiler/src/type-check-structs.ts
+index 09ff57035..32f7caaa6 100644
+--- a/lang/src/ts-compiler/src/type-check-structs.ts
++++ b/lang/src/ts-compiler/src/type-check-structs.ts
+@@ -424,6 +424,14 @@ export class ConstraintSolution {
+         const mapApp = (xs: TS.TypeMembers): TS.TypeMembers => typeMemberMap(xs, (_, x) => app(x));
+         return new TS.TRecord(mapApp(typ.fields), typ.l, typ.inferred);
+       }
++      case 't-table': {
++        const mapApp = (xs: TS.TypeMembers): TS.TypeMembers => typeMemberMap(xs, (_, x) => app(x));
++        return new TS.TTable(mapApp(typ.row), typ.l, typ.inferred);
++      }
++      case 't-row': {
++        const mapApp = (xs: TS.TypeMembers): TS.TypeMembers => typeMemberMap(xs, (_, x) => app(x));
++        return new TS.TRow(mapApp(typ.row), typ.l, typ.inferred);
++      }
+       case 't-tuple':
+         return new TS.TTuple(typ.elts.map(app), typ.l, typ.inferred);
+       case 't-forall':
+@@ -514,6 +522,21 @@ export class ConstraintSolution {
+           }
+           return [new TS.TRecord(newFields, typ2.l, typ2.inferred), fieldsMapping];
+         }
++        case 't-table':
++        case 't-row': {
++          const newRow: TS.TypeMembers = new Map();
++          let rowMapping = varMapping;
++          for (const key of typ2.row.keys()) {
++            const colTyp = mapGetValue(typ2.row, key);
++            const [newTyp, typMapping] = collectVars(colTyp, rowMapping);
++            newRow.set(key, newTyp);
++            rowMapping = typMapping;
++          }
++          const rebuilt = typ2.$name === 't-table'
++            ? new TS.TTable(newRow, typ2.l, typ2.inferred)
++            : new TS.TRow(newRow, typ2.l, typ2.inferred);
++          return [rebuilt, rowMapping];
++        }
+         case 't-tuple': {
+           let newElts: Type[] = [];
+           let eltsMapping = varMapping;
+@@ -949,6 +972,57 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
+                 return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+               }
+             }
++            // Tables/rows use the same width-subtyping discipline as records
++            // (every column the supertype demands must be present in the
++            // subtype with a compatible type; the subtype may have more
++            // columns). This lets, e.g., a Table<{name :: String, age ::
++            // Number}> be used wherever a Table<{name :: String}> is
++            // expected. Table and Row are kept as distinct tags (a Table is
++            // never a subtype of a Row or vice versa).
++            case 't-table': {
++              if (supertype.$name === 't-table') {
++                const aRow = subtype.row;
++                const bRow = supertype.row;
++                return foldrFoldResult<string, AnyConstraintSystem>((bKey, context2, system2) => {
++                  const aCol = aRow.get(bKey);
++                  if (aCol !== undefined) {
++                    const bCol = mapGetValue(bRow, bKey);
++                    return new FoldResult<AnyConstraintSystem>(system2.addConstraint(aCol, bCol), context2);
++                  } else {
++                    return new FoldErrors<AnyConstraintSystem>([new C.TypeMismatch(subtype, supertype)]);
++                  }
++                }, [...bRow.keys()], context, shadowSystem).bind((system2, context2) => {
++                  return solveHelperConstraints(system2, solution, context2);
++                });
++              } else if (TS.isOpaqueTableName(supertype)) {
++                // A known-shape table is always an acceptable "some table"
++                // (e.g. stack's argument type; see type-check.ts).
++                return solveHelperConstraints(shadowSystem, solution, context);
++              } else {
++                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
++              }
++            }
++            case 't-row': {
++              if (supertype.$name === 't-row') {
++                const aRow = subtype.row;
++                const bRow = supertype.row;
++                return foldrFoldResult<string, AnyConstraintSystem>((bKey, context2, system2) => {
++                  const aCol = aRow.get(bKey);
++                  if (aCol !== undefined) {
++                    const bCol = mapGetValue(bRow, bKey);
++                    return new FoldResult<AnyConstraintSystem>(system2.addConstraint(aCol, bCol), context2);
++                  } else {
++                    return new FoldErrors<AnyConstraintSystem>([new C.TypeMismatch(subtype, supertype)]);
++                  }
++                }, [...bRow.keys()], context, shadowSystem).bind((system2, context2) => {
++                  return solveHelperConstraints(system2, solution, context2);
++                });
++              } else if (TS.isOpaqueRowName(supertype)) {
++                return solveHelperConstraints(shadowSystem, solution, context);
++              } else {
++                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
++              }
++            }
+             case 't-tuple': {
+               if (supertype.$name === 't-tuple') {
+                 if (subtype.elts.length !== supertype.elts.length) {
+@@ -1257,6 +1331,14 @@ export function removeRefinementsAndForalls(typ: Type): Type {
+       const newFields = typeMemberMap(typ.fields, (_, fieldType) => rraf(fieldType));
+       return new TS.TRecord(newFields, typ.l, typ.inferred);
+     }
++    case 't-table': {
++      const newRow = typeMemberMap(typ.row, (_, colType) => rraf(colType));
++      return new TS.TTable(newRow, typ.l, typ.inferred);
++    }
++    case 't-row': {
++      const newRow = typeMemberMap(typ.row, (_, colType) => rraf(colType));
++      return new TS.TRow(newRow, typ.l, typ.inferred);
++    }
+     case 't-tuple':
+       return new TS.TTuple(typ.elts.map(rraf), typ.l, typ.inferred);
+     case 't-forall': {
+@@ -1333,6 +1415,32 @@ export function generalizeType(currentType: Type, nextType: Type): Type {
+       }
+       return newVar();
+     }
++    case 't-table': {
++      if (nextType.$name === 't-table') {
++        const aRow = currentType.row;
++        const bRow = nextType.row;
++        const keysSet = stringSetIntersect(new Set(aRow.keys()), new Set(bRow.keys()));
++        const newRow: TS.TypeMembers = new Map();
++        for (const key of keysSet) {
++          newRow.set(key, generalizeType(mapGetValue(aRow, key), mapGetValue(bRow, key)));
++        }
++        return new TS.TTable(newRow, currentType.l, currentType.inferred);
++      }
++      return newVar();
++    }
++    case 't-row': {
++      if (nextType.$name === 't-row') {
++        const aRow = currentType.row;
++        const bRow = nextType.row;
++        const keysSet = stringSetIntersect(new Set(aRow.keys()), new Set(bRow.keys()));
++        const newRow: TS.TypeMembers = new Map();
++        for (const key of keysSet) {
++          newRow.set(key, generalizeType(mapGetValue(aRow, key), mapGetValue(bRow, key)));
++        }
++        return new TS.TRow(newRow, currentType.l, currentType.inferred);
++      }
++      return newVar();
++    }
+     case 't-tuple': {
+       if (nextType.$name === 't-tuple') {
+         if (currentType.elts.length !== nextType.elts.length) {
+@@ -1446,6 +1554,14 @@ export function flattenTreeWithPaths(typ: Type): [Type, Path][] {
+         }
+         return [...fieldPairs, [typ2, currentPath] as [Type, Path]];
+       }
++      case 't-table':
++      case 't-row': {
++        const fieldPairs: [Type, Path][] = [];
++        for (const fieldName of typ2.row.keys()) {
++          fieldPairs.push(...helper(mapGetValue(typ2.row, fieldName), [...currentPath, new RecordPath(fieldName)]));
++        }
++        return [...fieldPairs, [typ2, currentPath] as [Type, Path]];
++      }
+       case 't-tuple': {
+         const eltPairs = typ2.elts.map((elt, idx) => helper(elt, [...currentPath, new TuplePath(idx)]));
+         return [...flattenList(eltPairs), [typ2, currentPath] as [Type, Path]];
+@@ -1493,6 +1609,18 @@ export function maintainCommonStructure(struct: Structure, typ: Type): Type {
+         });
+         return new TS.TRecord(newFields, typ2.l, typ2.inferred);
+       }
++      case 't-table': {
++        const newRow = typeMemberMap(typ2.row, (fieldName, colType) => {
++          return maintainStructure(colType, [...currentPath, new RecordPath(fieldName)], newPaths);
++        });
++        return new TS.TTable(newRow, typ2.l, typ2.inferred);
++      }
++      case 't-row': {
++        const newRow = typeMemberMap(typ2.row, (fieldName, colType) => {
++          return maintainStructure(colType, [...currentPath, new RecordPath(fieldName)], newPaths);
++        });
++        return new TS.TRow(newRow, typ2.l, typ2.inferred);
++      }
+       case 't-tuple': {
+         const newElts = typ2.elts.map((elt, idx) => maintainStructure(elt, [...currentPath, new TuplePath(idx)], newPaths));
+         return new TS.TTuple(newElts, typ2.l, typ2.inferred);
+diff --git a/lang/src/ts-compiler/src/type-check.ts b/lang/src/ts-compiler/src/type-check.ts
+index a08619e26..461fc8522 100644
+--- a/lang/src/ts-compiler/src/type-check.ts
++++ b/lang/src/ts-compiler/src/type-check.ts
+@@ -621,6 +621,23 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
+             return raise('s-for should have already been desugared');
+           case 's-check':
+             return new TCS.TypingResult(e, expectType, context);
++          // No table form has a useful bidirectional ("checking") rule of
++          // its own beyond what synthesis already gives (the one place an
++          // expected type would help -- table literals against a
++          // Table<{...}> annotation -- is instead handled by that
++          // annotation's per-column anns via s-table's own synthesis case,
++          // since a header's `:: Ann` is already a per-column expected
++          // type); fall back to synthesize-then-unify, as s-app/s-dot/etc.
++          // do above.
++          case 's-table':
++          case 's-load-table':
++          case 's-table-select':
++          case 's-table-order':
++          case 's-table-extract':
++          case 's-table-filter':
++          case 's-table-update':
++          case 's-table-extend':
++            return checkSynthesis(e, expectType, topLevel, context);
+           default:
+             throw new InternalCompilerError('No cases matched in checking for ' + e.$name);
+         }
+@@ -630,6 +647,479 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
+   });
+ }
+ 
++// ################### Tables ####################
++// See DESIGN.md for the surface syntax/grammar and the rationale. Column
++// shapes are tracked precisely (as a TS.TTable, see type-structs.ts) only
++// when they can be -- table literals, and values flowing from an explicit
++// `Table<{...}>` annotation or a previous precisely-typed table operation.
++// A value of the bare `Table` annotation (which aliases to Any in the base
++// environment; see compile-structs.ts's runtimeProvides) or of a
++// not-yet-solved existential is treated as "dynamic": these operations
++// still type-check against such values (so old, untyped table code keeps
++// compiling) but grant no column-level guarantees, exactly matching this
++// compiler's behavior before table types existed.
++
++// The result of trying to view a (already-synthesized) type as a table.
++type TableShape =
++  | { tag: 'known'; row: TypeMembers }
++  | { tag: 'dynamic' }
++  | { tag: 'error'; error: C.CompileError };
++
++function tableShapeOf(origExpr: Expr, typ: Type, context: Context): TableShape {
++  const resolved = TCS.resolveAlias(typ, context);
++  if (TS.isTTop(resolved) || TS.isTExistential(resolved) || TS.isOpaqueTableName(resolved)) {
++    return { tag: 'dynamic' };
++  }
++  switch (resolved.$name) {
++    case 't-table':
++      return { tag: 'known', row: resolved.row };
++    default:
++      return {
++        tag: 'error',
++        error: new C.IncorrectTypeExpression(resolved.toString(), resolved.l, 'a Table', origExpr.l, origExpr),
++      };
++  }
++}
++
++// Same idea as tableShapeOf, but for Row-shaped receivers (t-row instead of
++// t-table) -- used when dispatching Row methods (get-value, get, ...) so
++// that, e.g., a build-column/filter callback's Row-typed parameter is
++// recognized, rather than only literal `table:` values.
++function rowShapeOf(origExpr: Expr, typ: Type, context: Context): TableShape {
++  const resolved = TCS.resolveAlias(typ, context);
++  if (TS.isTTop(resolved) || TS.isTExistential(resolved) || TS.isOpaqueRowName(resolved)) {
++    return { tag: 'dynamic' };
++  }
++  switch (resolved.$name) {
++    case 't-row':
++      return { tag: 'known', row: resolved.row };
++    default:
++      return {
++        tag: 'error',
++        error: new C.IncorrectTypeExpression(resolved.toString(), resolved.l, 'a Row', origExpr.l, origExpr),
++      };
++  }
++}
++
++function tListOf(elemType: Type, l: Loc): Type {
++  return new TS.TApp(new TS.TName(new TS.ModuleUri('builtin://lists'), new A.STypeGlobal('List'), l, false), [elemType], l, false);
++}
++
++// Looking up a single column behaves exactly like looking up an object's
++// field (missing-field reporting is reused verbatim), except that a
++// "dynamic" (unknown-shape) table skips the check rather than erroring.
++type ColumnLookup =
++  | { tag: 'ok'; typ: Type }
++  | { tag: 'skip' }
++  | { tag: 'error'; error: C.CompileError };
++
++function requireColumn(shape: TableShape, colName: string, tableLoc: Loc, colLoc: Loc): ColumnLookup {
++  switch (shape.tag) {
++    case 'known': {
++      const found = shape.row.get(colName);
++      if (found === undefined) {
++        const tableTypeStr = new TS.TTable(shape.row, tableLoc, false).toString();
++        return { tag: 'error', error: new C.ObjectMissingField(colName, tableTypeStr, tableLoc, colLoc) };
++      }
++      return { tag: 'ok', typ: found };
++    }
++    case 'dynamic':
++      return { tag: 'skip' };
++    case 'error':
++      return { tag: 'error', error: shape.error };
++  }
++}
++
++function columnLookupOrAny(lookup: ColumnLookup, l: Loc): Type {
++  return lookup.tag === 'ok' ? lookup.typ : new TS.TTop(l, false);
++}
++
++// add-column/build-column (and table-extend's extension fields) require a
++// *fresh* column name; reusing ObjectMissingField here (as an earlier
++// version of this code did) is backwards -- the column is not missing, it
++// already exists -- so this constructs a dedicated, accurately-worded error
++// instead (matching the runtime's own "column-name-exists" check).
++function duplicateColumnError(colName: string, row: TypeMembers, tableLoc: Loc, colLoc: Loc): C.CompileError {
++  const tableTypeStr = new TS.TTable(row, tableLoc, false).toString();
++  return new C.CantTypecheck(
++    'column `' + colName + '` already exists in ' + tableTypeStr + '; give the new column a different name',
++    colLoc);
++}
++
++// TableShape with the 'error' case already ruled out (used once
++// bindColumnBinds has already short-circuited on an error).
++type ResolvedTableShape = { tag: 'known'; row: TypeMembers } | { tag: 'dynamic' };
++
++// Shared by table-extend/table-update/table-filter: synthesizes the source
++// table, then binds each name in the `using` clause to its column's type.
++// By convention (matching well-formed.ts's TableReducerBadColumn check and
++// this file's historical desugaring) each bind's OWN identifier names the
++// column it projects -- `using name, age` brings `name` and `age` into
++// scope as the current row's values in those columns. Returns the bound
++// context (which the caller must eventually pop with removeBinding, as
++// s-let-expr does for its own bindings) plus the table's shape and rewritten
++// AST, so error/typing information can still be threaded through if the
++// bindings themselves are missing a column.
++function bindColumnBinds(
++  columnBinds: A.ColumnBinds,
++  context: Context,
++): AnyFoldResult<{ newTable: Expr; shape: ResolvedTableShape; boundCtx: Context }> {
++  return synthesis(columnBinds.table, false, context).foldBind((newTable, tableType, ctx) => {
++    const shape = tableShapeOf(newTable, tableType, ctx);
++    if (shape.tag === 'error') {
++      return new TCS.FoldErrors<{ newTable: Expr; shape: ResolvedTableShape; boundCtx: Context }>([shape.error]);
++    }
++    let boundCtx = ctx;
++    for (const bind of columnBinds.binds) {
++      const bindId = (bind as A.SBind).id;
++      const lookup = requireColumn(shape, bindId.toname(), columnBinds.table.l, bind.l);
++      if (lookup.tag === 'error') {
++        return new TCS.FoldErrors<{ newTable: Expr; shape: ResolvedTableShape; boundCtx: Context }>([lookup.error]);
++      }
++      boundCtx = boundCtx.addBinding(bindId.key(), columnLookupOrAny(lookup, bind.l));
++    }
++    return new TCS.FoldResult({ newTable, shape, boundCtx }, boundCtx);
++  });
++}
++
++function popColumnBinds(columnBinds: A.ColumnBinds, ctx: Context): Context {
++  let outCtx = ctx;
++  for (const bind of columnBinds.binds) {
++    outCtx = outCtx.removeBinding(((bind as A.SBind).id).key());
++  }
++  return outCtx;
++}
++
++function tableResultType(shape: TableShape, l: Loc): Type {
++  return shape.tag === 'known' ? new TS.TTable(shape.row, l, false) : TS.tTable(l);
++}
++
++// ---------- Table/Row method calls (t.column(...), r.get-value(...), etc.) ----------
++// The Table API is a large, ad hoc set of methods (see table.js/tables.arr);
++// rather than modeling Table/Row as a DataType with declared method fields
++// (which would route through the generic object/field-constraint machinery
++// in instantiateObjectType/solveHelperFields), this curated dispatch
++// special-cases method calls whose receiver is a known TTable/TRow (or a
++// dynamic/Any table, for backward compatibility) directly in `s-app`,
++// before the generic s-dot/synthesisField path runs. Method calls on any
++// other receiver, or table method NAMES this dispatch doesn't recognize,
++// fall through unchanged to that generic path (which reports a plain "not
++// an object type" style error for a known-precise Table/Row receiver, since
++// Table/Row are not represented as object/record types). See DESIGN.md for
++// the full list of modeled vs. unmodeled methods and why each literal-name
++// case is (or isn't) statically checked.
++
++const tableMethodNames = new Set([
++  'column-names', 'length', 'all-rows', 'all-columns', 'empty',
++  'row-n', 'column-n', 'column', 'get-column', 'drop', 'increasing-by', 'decreasing-by',
++  'order-by', 'rename-column', 'add-column', 'build-column', 'transform-column',
++  'filter', 'filter-by', 'order-by-columns', 'stack', 'reduce',
++]);
++const rowMethodNames = new Set(['get-value', 'get', 'get-column-names']);
++
++function literalColName(e: Expr): string | undefined {
++  return e.$name === 's-str' ? e.s : undefined;
++}
++
++function tOptionOf(elemType: Type, l: Loc): Type {
++  return new TS.TApp(new TS.TName(new TS.ModuleUri('builtin://option'), new A.STypeGlobal('Option'), l, false), [elemType], l, false);
++}
++
++function tableTypeFromShape(shape: ResolvedTableShape, l: Loc): Type {
++  return shape.tag === 'known' ? new TS.TTable(shape.row, l, false) : TS.tTable(l);
++}
++
++function rowTypeFromShape(shape: ResolvedTableShape, l: Loc): Type {
++  // The dynamic case must fall back to the opaque `Row` name (matching
++  // tableTypeFromShape's fallback for Table), not Any: a bare `Row`
++  // annotation resolves to this same opaque name (see isOpaqueRowName), and
++  // callback parameters are often given that annotation explicitly (e.g.
++  // core.arr's `fn :: (Row -> Any)`), which only unifies against another
++  // opaque Row, not against Any (Any does not implicitly narrow into a
++  // concrete/nominal expected type in this checker).
++  return shape.tag === 'known' ? new TS.TRow(shape.row, l, false) : TS.tRow(l);
++}
++
++// Threads a list of (arg, expectedType) pairs through `checking`, in order.
++function checkArgsAgainst(pairs: [Expr, Type][], context: Context): AnyFoldResult<Expr[]> {
++  return TCS.mapFoldResult((pair: [Expr, Type], ctx: Context): AnyFoldResult<Expr> =>
++    checking(pair[0], pair[1], false, ctx).foldBind((newArg, _t, ctx2) => new TCS.FoldResult(newArg, ctx2)),
++  pairs, context);
++}
++
++function synthesisTableMethodCall(appLoc: Loc, dotExpr: A.SDot, args: Expr[], context: Context): AnyTypingResult | undefined {
++  const field = dotExpr.field;
++  const isTableMethod = tableMethodNames.has(field);
++  const isRowMethod = rowMethodNames.has(field);
++  if (!isTableMethod && !isRowMethod) { return undefined; }
++  const synthObj = synthesis(dotExpr.obj, false, context);
++  if (synthObj.$name === 'typing-error') { return undefined; }
++  const newObj = synthObj.ast;
++  const objType = synthObj.typ;
++  const ctx0 = synthObj.outContext;
++  if (isTableMethod) {
++    const shape = tableShapeOf(newObj, objType, ctx0);
++    if (shape.tag === 'error') { return undefined; }
++    return synthesisTableMethod(appLoc, dotExpr.l, newObj, field, args, shape, ctx0);
++  } else {
++    const shape = rowShapeOf(newObj, objType, ctx0);
++    if (shape.tag === 'error') { return undefined; }
++    return synthesisRowMethod(appLoc, dotExpr.l, newObj, field, args, shape, ctx0);
++  }
++}
++
++function synthesisTableMethod(
++  appLoc: Loc, dotLoc: Loc, newObj: Expr, field: string, args: Expr[], shape: ResolvedTableShape, context: Context,
++): AnyTypingResult {
++  const recreate = (newArgs: Expr[]): Expr => new A.SApp(appLoc, new A.SDot(dotLoc, newObj, field), newArgs);
++  const listStr = tListOf(TS.tString(appLoc), appLoc);
++  const anyT = (): Type => new TS.TTop(appLoc, false);
++  const wrongArity = (n: number): AnyTypingResult | undefined => (args.length === n ? undefined : missingArity());
++  const missingArity = (): AnyTypingResult =>
++    new TCS.TypingError([new C.IncorrectNumberOfArgs(recreate(args), new TS.TArrow(args.map(() => anyT()), anyT(), appLoc, false))]);
++
++  switch (field) {
++    case 'column-names':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), listStr, context);
++    case 'get-column-names':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), listStr, context);
++    case 'length':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), TS.tNumber(appLoc), context);
++    case 'all-rows':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), tListOf(rowTypeFromShape(shape, appLoc), appLoc), context);
++    case 'all-columns':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), tListOf(tListOf(anyT(), appLoc), appLoc), context);
++    case 'empty':
++      return wrongArity(0) ?? new TCS.TypingResult(recreate([]), tableTypeFromShape(shape, appLoc), context);
++    case 'row-n': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      return checkArgsAgainst([[args[0], TS.tNumber(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), rowTypeFromShape(shape, appLoc), ctx));
++    }
++    case 'column-n': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      return checkArgsAgainst([[args[0], TS.tNumber(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tListOf(anyT(), appLoc), ctx));
++    }
++    case 'column':
++    case 'get-column': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      const colType = colName === undefined
++        ? anyT()
++        : (() => {
++          const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++          return lookup.tag === 'error' ? undefined : columnLookupOrAny(lookup, appLoc);
++        })();
++      if (colName !== undefined && colType === undefined) {
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        return new TCS.TypingError([(lookup as { tag: 'error'; error: C.CompileError }).error]);
++      }
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tListOf(colType ?? anyT(), appLoc), ctx));
++    }
++    case 'drop': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) => {
++        if (colName === undefined || shape.tag === 'dynamic') {
++          return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx);
++        }
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        const newRow = new Map(shape.row);
++        newRow.delete(colName);
++        return new TCS.TypingResult(recreate(newArgs), new TS.TTable(newRow, appLoc, false), ctx);
++      });
++    }
++    case 'increasing-by':
++    case 'decreasing-by': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) => {
++        if (colName !== undefined && shape.tag === 'known') {
++          const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++          if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        }
++        return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx);
++      });
++    }
++    case 'order-by': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], TS.tBoolean(appLoc)]], context).typingBind((newArgs, ctx) => {
++        if (colName !== undefined && shape.tag === 'known') {
++          const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++          if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        }
++        return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx);
++      });
++    }
++    case 'rename-column': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const oldName = literalColName(args[0]);
++      const newName = literalColName(args[1]);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) => {
++        if (oldName === undefined || newName === undefined || shape.tag === 'dynamic') {
++          return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx);
++        }
++        const lookup = requireColumn(shape, oldName, dotLoc, args[0].l);
++        if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        const newRow = new Map(shape.row);
++        newRow.delete(oldName);
++        newRow.set(newName, columnLookupOrAny(lookup, appLoc));
++        return new TCS.TypingResult(recreate(newArgs), new TS.TTable(newRow, appLoc, false), ctx);
++      });
++    }
++    case 'add-column': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      const elemExists = newExistential(appLoc, true);
++      let ctx1 = context.addVariable(elemExists);
++      if (colName !== undefined && shape.tag === 'known' && shape.row.has(colName)) {
++        return new TCS.TypingError([duplicateColumnError(colName, shape.row, dotLoc, args[0].l)]);
++      }
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], tListOf(elemExists, appLoc)]], ctx1).typingBind((newArgs, ctx2) => {
++        if (colName === undefined || shape.tag === 'dynamic') {
++          return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx2);
++        }
++        const newRow = new Map(shape.row);
++        newRow.set(colName, elemExists);
++        return new TCS.TypingResult(recreate(newArgs), new TS.TTable(newRow, appLoc, false), ctx2);
++      });
++    }
++    case 'build-column': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      if (colName !== undefined && shape.tag === 'known' && shape.row.has(colName)) {
++        return new TCS.TypingError([duplicateColumnError(colName, shape.row, dotLoc, args[0].l)]);
++      }
++      const retExists = newExistential(appLoc, true);
++      const ctx1 = context.addVariable(retExists);
++      const fnType = new TS.TArrow([rowTypeFromShape(shape, appLoc)], retExists, appLoc, false);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], fnType]], ctx1).typingBind((newArgs, ctx2) => {
++        if (colName === undefined || shape.tag === 'dynamic') {
++          return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx2);
++        }
++        const newRow = new Map(shape.row);
++        newRow.set(colName, retExists);
++        return new TCS.TypingResult(recreate(newArgs), new TS.TTable(newRow, appLoc, false), ctx2);
++      });
++    }
++    case 'transform-column': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      const oldType = (colName !== undefined && shape.tag === 'known') ? shape.row.get(colName) : undefined;
++      if (colName !== undefined && shape.tag === 'known' && oldType === undefined) {
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        return new TCS.TypingError([(lookup as { tag: 'error'; error: C.CompileError }).error]);
++      }
++      const retExists = newExistential(appLoc, true);
++      const ctx1 = context.addVariable(retExists);
++      const fnType = new TS.TArrow([oldType ?? anyT()], retExists, appLoc, false);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], fnType]], ctx1).typingBind((newArgs, ctx2) => {
++        if (colName === undefined || oldType === undefined || shape.tag === 'dynamic') {
++          return new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx2);
++        }
++        const newRow = new Map(shape.row);
++        newRow.set(colName, retExists);
++        return new TCS.TypingResult(recreate(newArgs), new TS.TTable(newRow, appLoc, false), ctx2);
++      });
++    }
++    case 'filter': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      const fnType = new TS.TArrow([rowTypeFromShape(shape, appLoc)], TS.tBoolean(appLoc), appLoc, false);
++      return checkArgsAgainst([[args[0], fnType]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx));
++    }
++    case 'filter-by': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      let colType: Type = anyT();
++      if (colName !== undefined && shape.tag === 'known') {
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        colType = columnLookupOrAny(lookup, appLoc);
++      }
++      const fnType = new TS.TArrow([colType], TS.tBoolean(appLoc), appLoc, false);
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], fnType]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx));
++    }
++    case 'order-by-columns': {
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      const specType = tListOf(new TS.TTuple([TS.tString(appLoc), TS.tBoolean(appLoc)], appLoc, false), appLoc);
++      return checkArgsAgainst([[args[0], specType]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx));
++    }
++    case 'stack': {
++      // Real `stack` requires the argument to have exactly the same column
++      // *set* as the receiver (any order); that's not expressible with this
++      // checker's width-subtyping (see DESIGN.md), so the argument is only
++      // required to be *some* table, and mismatches are left to the
++      // existing runtime check in table.js -- a deliberate "leave
++      // untypable rather than unsound" gap, not an unsound approximation
++      // (the dynamic check still runs).
++      const early = wrongArity(1); if (early !== undefined) { return early; }
++      return checkArgsAgainst([[args[0], TS.tTable(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tableTypeFromShape(shape, appLoc), ctx));
++    }
++    case 'reduce': {
++      const early = wrongArity(2); if (early !== undefined) { return early; }
++      const colName = literalColName(args[0]);
++      if (colName !== undefined && shape.tag === 'known') {
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++      }
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)], [args[1], anyT()]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), anyT(), ctx));
++    }
++    default:
++      return undefined as unknown as AnyTypingResult; // unreachable: field is in tableMethodNames
++  }
++}
++
++function synthesisRowMethod(
++  appLoc: Loc, dotLoc: Loc, newObj: Expr, field: string, args: Expr[], shape: ResolvedTableShape, context: Context,
++): AnyTypingResult {
++  const recreate = (newArgs: Expr[]): Expr => new A.SApp(appLoc, new A.SDot(dotLoc, newObj, field), newArgs);
++  const anyT = (): Type => new TS.TTop(appLoc, false);
++  switch (field) {
++    case 'get-column-names': {
++      if (args.length !== 0) {
++        return new TCS.TypingError([new C.IncorrectNumberOfArgs(recreate(args), new TS.TArrow([], anyT(), appLoc, false))]);
++      }
++      return new TCS.TypingResult(recreate([]), tListOf(TS.tString(appLoc), appLoc), context);
++    }
++    case 'get-value': {
++      if (args.length !== 1) {
++        return new TCS.TypingError([new C.IncorrectNumberOfArgs(recreate(args), new TS.TArrow([anyT()], anyT(), appLoc, false))]);
++      }
++      const colName = literalColName(args[0]);
++      if (colName !== undefined && shape.tag === 'known') {
++        const lookup = requireColumn(shape, colName, dotLoc, args[0].l);
++        if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++        return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) =>
++          new TCS.TypingResult(recreate(newArgs), columnLookupOrAny(lookup, appLoc), ctx));
++      }
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), anyT(), ctx));
++    }
++    case 'get': {
++      if (args.length !== 1) {
++        return new TCS.TypingError([new C.IncorrectNumberOfArgs(recreate(args), new TS.TArrow([anyT()], anyT(), appLoc, false))]);
++      }
++      const colName = literalColName(args[0]);
++      const colType = (colName !== undefined && shape.tag === 'known') ? shape.row.get(colName) : undefined;
++      return checkArgsAgainst([[args[0], TS.tString(appLoc)]], context).typingBind((newArgs, ctx) =>
++        new TCS.TypingResult(recreate(newArgs), tOptionOf(colType ?? anyT(), appLoc), ctx));
++    }
++    default:
++      return undefined as unknown as AnyTypingResult; // unreachable: field is in rowMethodNames
++  }
++}
++
++// ################################################
++
+ export function synthesis(e: Expr, topLevel: boolean, context: Context): AnyTypingResult {
+   return _synthesis(e, topLevel, context);
+ }
+@@ -852,6 +1342,10 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
+         return raise('synthesis for s-construct not implemented');
+       case 's-app': {
+         const { l, _fun, args } = e;
++        if (_fun.$name === 's-dot') {
++          const tableResult = synthesisTableMethodCall(l, _fun, args, context);
++          if (tableResult !== undefined) { return tableResult; }
++        }
+         return synthesisAppFun(l, _fun, args, context)
+           .typingBind((funType, ctx) =>
+             synthesisSpine(funType, (exprs) => new A.SApp(l, _fun, exprs), args, l, ctx));
+@@ -950,6 +1444,10 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
+           });
+       }
+       case 's-bracket':
++        // Unreachable post-desugar: desugar.ts's s-bracket case always
++        // rewrites `expr[key]` to `SPrimApp('getBracket', ...)` before
++        // type-check ever runs (see type-defaults.ts's 'getBracket' entry
++        // for the actual fix to bracket indexing under -type-check).
+         return raise('synthesis for s-bracket not implemented');
+       case 's-data':
+         return raise('s-data should have already been desugared');
+@@ -963,6 +1461,210 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
+         const ctx = context.addVariable(resultType);
+         return new TCS.TypingResult(e, resultType, ctx);
+       }
++      case 's-table': {
++        const { l, headers, rows } = e;
++        return TCS.mapFoldResult((header: A.FieldName, ctx: Context) => toType(header.ann, ctx), headers, context)
++          .typingBind((annTypes, ctx0) => {
++            const processRow = (row: A.TableRow, ctx: Context): AnyFoldResult<{ newRow: A.TableRow; cellTypes: Type[] }> => {
++              const cellPairs: [Expr, Type | undefined][] = row.elems.map((cell, n) => [cell, annTypes[n]]);
++              return TCS.mapFoldResult((pair: [Expr, Type | undefined], ctx2: Context): AnyFoldResult<[Expr, Type]> => {
++                const [cell, annTyp] = pair;
++                const result = annTyp === undefined ? synthesis(cell, false, ctx2) : checking(cell, annTyp, false, ctx2);
++                return result.foldBind((newCell, cellType, ctx3) => new TCS.FoldResult([newCell, cellType] as [Expr, Type], ctx3));
++              }, cellPairs, ctx).bind((cellResults, ctx3) =>
++                new TCS.FoldResult({
++                  newRow: new A.STableRow(row.l, cellResults.map(([ce]) => ce)),
++                  cellTypes: cellResults.map(([, ct]) => ct),
++                }, ctx3));
++            };
++            return TCS.mapFoldResult(processRow, rows, ctx0).typingBind((rowResults, ctx1) => {
++              const newRows = rowResults.map((r) => r.newRow);
++              const colIndices = headers.map((_h, i) => i);
++              return TCS.mapFoldResult((colIdx: number, ctx: Context): AnyFoldResult<Type> => {
++                const declared = annTypes[colIdx];
++                if (declared !== undefined) {
++                  return new TCS.FoldResult(declared, ctx);
++                } else if (rowResults.length === 0) {
++                  return new TCS.FoldResult(new TS.TTop(l, false), ctx);
++                } else {
++                  return meetBranchTypes(rowResults.map((r) => r.cellTypes[colIdx]), l, ctx);
++                }
++              }, colIndices, ctx1).typingBind((colTypes, ctx2) => {
++                const newRowType: TypeMembers = new Map();
++                headers.forEach((header, i) => newRowType.set(header.name, colTypes[i]));
++                return new TCS.TypingResult(new A.STable(l, headers, newRows), new TS.TTable(newRowType, l, false), ctx2);
++              });
++            });
++          });
++      }
++      case 's-load-table': {
++        const { l, headers, spec } = e;
++        return TCS.mapFoldResult((header: A.FieldName, ctx: Context): AnyFoldResult<Type> =>
++          toType(header.ann, ctx).bind((maybeAnn, ctx2) => maybeAnn === undefined
++            ? new TCS.FoldErrors<Type>([new C.LoadTableColumnNeedsAnnotation(header.name, header.l)])
++            : new TCS.FoldResult<Type>(maybeAnn, ctx2)),
++        headers, context).typingBind((colTypes, ctx0) =>
++          TCS.mapFoldResult((s: A.LoadTableSpec, ctx: Context): AnyFoldResult<A.LoadTableSpec> => {
++            switch (s.$name) {
++              case 's-sanitize':
++                return synthesis(s.sanitizer, false, ctx).foldBind((newSanitizer, _t, ctx2) =>
++                  new TCS.FoldResult<A.LoadTableSpec>(new A.SSanitize(s.l, s.name, newSanitizer), ctx2));
++              case 's-table-src':
++                return synthesis(s.src, false, ctx).foldBind((newSrc, _t, ctx2) =>
++                  new TCS.FoldResult<A.LoadTableSpec>(new A.STableSrc(s.l, newSrc), ctx2));
++              default:
++                throw new InternalCompilerError('Unknown LoadTableSpec in synthesis for s-load-table');
++            }
++          }, spec, ctx0).typingBind((newSpec, ctx1) => {
++            const newRow: TypeMembers = new Map();
++            headers.forEach((header, i) => newRow.set(header.name, colTypes[i]));
++            return new TCS.TypingResult(new A.SLoadTable(l, headers, newSpec), new TS.TTable(newRow, l, false), ctx1);
++          }));
++      }
++      case 's-table-select': {
++        const { l, columns, table } = e;
++        return synthesis(table, false, context).bind((newTable, tableType, ctx) => {
++          const shape = tableShapeOf(newTable, tableType, ctx);
++          if (shape.tag === 'error') { return new TCS.TypingError([shape.error]); }
++          const newExpr = new A.STableSelect(l, columns, newTable);
++          if (shape.tag === 'dynamic') {
++            return new TCS.TypingResult(newExpr, TS.tTable(l), ctx);
++          }
++          const newRow: TypeMembers = new Map();
++          for (const col of columns) {
++            const colName = (col as A.SName).s;
++            const lookup = requireColumn(shape, colName, table.l, (col as A.SName).l);
++            if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++            newRow.set(colName, columnLookupOrAny(lookup, l));
++          }
++          return new TCS.TypingResult(newExpr, new TS.TTable(newRow, l, false), ctx);
++        });
++      }
++      case 's-table-order': {
++        const { l, table, ordering } = e;
++        return synthesis(table, false, context).bind((newTable, tableType, ctx) => {
++          const shape = tableShapeOf(newTable, tableType, ctx);
++          if (shape.tag === 'error') { return new TCS.TypingError([shape.error]); }
++          const newExpr = new A.STableOrder(l, newTable, ordering);
++          if (shape.tag === 'dynamic') {
++            return new TCS.TypingResult(newExpr, TS.tTable(l), ctx);
++          }
++          for (const o of ordering) {
++            const colName = (o.column as A.SName).s;
++            const lookup = requireColumn(shape, colName, table.l, (o.column as A.SName).l);
++            if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++          }
++          return new TCS.TypingResult(newExpr, new TS.TTable(shape.row, l, false), ctx);
++        });
++      }
++      case 's-table-extract': {
++        const { l, column, table } = e;
++        return synthesis(table, false, context).bind((newTable, tableType, ctx) => {
++          const shape = tableShapeOf(newTable, tableType, ctx);
++          if (shape.tag === 'error') { return new TCS.TypingError([shape.error]); }
++          const newExpr = new A.STableExtract(l, column, newTable);
++          if (shape.tag === 'dynamic') {
++            return new TCS.TypingResult(newExpr, tListOf(new TS.TTop(l, false), l), ctx);
++          }
++          const colName = (column as A.SName).s;
++          const lookup = requireColumn(shape, colName, table.l, (column as A.SName).l);
++          if (lookup.tag === 'error') { return new TCS.TypingError([lookup.error]); }
++          return new TCS.TypingResult(newExpr, tListOf(columnLookupOrAny(lookup, l), l), ctx);
++        });
++      }
++      case 's-table-filter': {
++        const { l, columnBinds, predicate } = e;
++        return bindColumnBinds(columnBinds, context).typingBind(({ newTable, shape, boundCtx }) =>
++          checking(predicate, TS.tBoolean(predicate.l), false, boundCtx).bind((newPred, _predTyp, ctx2) => {
++            const outCtx = popColumnBinds(columnBinds, ctx2);
++            const newColumnBinds = new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable);
++            const newExpr = new A.STableFilter(l, newColumnBinds, newPred);
++            return new TCS.TypingResult(newExpr, tableResultType(shape, l), outCtx);
++          }));
++      }
++      case 's-table-update': {
++        const { l, columnBinds, updates } = e;
++        return bindColumnBinds(columnBinds, context).typingBind(({ newTable, shape, boundCtx }) => {
++          const processUpdate = (u: A.Member, ctx: Context): AnyFoldResult<A.Member> => {
++            const dataField = u as A.SDataField;
++            const lookup = requireColumn(shape, dataField.name, columnBinds.table.l, dataField.l);
++            if (lookup.tag === 'error') { return new TCS.FoldErrors<A.Member>([lookup.error]); }
++            const expectType = columnLookupOrAny(lookup, dataField.l);
++            return checking(dataField.value, expectType, false, ctx).foldBind((newVal, _t, ctx2) =>
++              new TCS.FoldResult<A.Member>(new A.SDataField(dataField.l, dataField.name, newVal), ctx2));
++          };
++          return TCS.mapFoldResult(processUpdate, updates, boundCtx).typingBind((newUpdates, ctx2) => {
++            const outCtx = popColumnBinds(columnBinds, ctx2);
++            const newColumnBinds = new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable);
++            const newExpr = new A.STableUpdate(l, newColumnBinds, newUpdates);
++            return new TCS.TypingResult(newExpr, tableResultType(shape, l), outCtx);
++          });
++        });
++      }
++      case 's-table-extend': {
++        const { l, columnBinds, extensions } = e;
++        return bindColumnBinds(columnBinds, context).typingBind(({ newTable, shape, boundCtx }) => {
++          const processExt = (ext: A.TableExtendField, ctx: Context): AnyFoldResult<[A.TableExtendField, string, Type]> => {
++            switch (ext.$name) {
++              case 's-table-extend-field': {
++                return toType(ext.ann, ctx).bind((maybeAnn, ctx2) => {
++                  const checked = maybeAnn === undefined ? synthesis(ext.value, false, ctx2) : checking(ext.value, maybeAnn, false, ctx2);
++                  return checked.foldBind((newVal, valType, ctx3) => {
++                    const colType = maybeAnn === undefined ? valType : maybeAnn;
++                    const newField: A.TableExtendField = new A.STableExtendField(ext.l, ext.name, newVal, ext.ann);
++                    return new TCS.FoldResult([newField, ext.name, colType] as [A.TableExtendField, string, Type], ctx3);
++                  });
++                });
++              }
++              case 's-table-extend-reducer': {
++                // A reducer's declared shape is polymorphic in Acc (the
++                // running accumulator) and OutVal (the emitted per-row
++                // value) -- see tables.arr's real `Reducer<Acc, InVal,
++                // OutVal>` type -- and this checker does not attempt to
++                // verify a reducer expression's internal shape against
++                // that alias (see DESIGN.md's "left untypable" section).
++                // What *is* checked: the extended column needs an explicit
++                // return-type annotation (there is no expression here whose
++                // type could otherwise tell us the new column's sort), and
++                // the `of <column>` reference must name a real column of
++                // the source table.
++                return toType(ext.ann, ctx).bind((maybeAnn, ctx2) => {
++                  if (maybeAnn === undefined) {
++                    return new TCS.FoldErrors<[A.TableExtendField, string, Type]>([new C.CantTypecheck(
++                      'a reducer column needs a return-type annotation (e.g. `' + ext.name + ' :: Number:`); '
++                      + 'the type checker cannot infer a reducer\'s output sort from the reducer expression alone',
++                      ext.l)]);
++                  }
++                  const colLookup = requireColumn(shape, (ext.col as A.SName).s, columnBinds.table.l, (ext.col as A.SName).l);
++                  if (colLookup.tag === 'error') {
++                    return new TCS.FoldErrors<[A.TableExtendField, string, Type]>([colLookup.error]);
++                  }
++                  return synthesis(ext.reducer, false, ctx2).foldBind((newReducer, _reducerTyp, ctx3) => {
++                    const newField: A.TableExtendField = new A.STableExtendReducer(ext.l, ext.name, newReducer, ext.col, ext.ann);
++                    return new TCS.FoldResult([newField, ext.name, maybeAnn] as [A.TableExtendField, string, Type], ctx3);
++                  });
++                });
++              }
++              default:
++                throw new InternalCompilerError('Unknown TableExtendField in synthesis for s-table-extend');
++            }
++          };
++          return TCS.mapFoldResult(processExt, extensions, boundCtx).typingBind((results, ctx2) => {
++            const outCtx = popColumnBinds(columnBinds, ctx2);
++            const newExtensions = results.map(([ext]) => ext);
++            const newColumnBinds = new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable);
++            const newExpr = new A.STableExtend(l, newColumnBinds, newExtensions);
++            if (shape.tag === 'dynamic') {
++              return new TCS.TypingResult(newExpr, TS.tTable(l), outCtx);
++            }
++            const newRow: TypeMembers = new Map(shape.row);
++            for (const [, name, typ] of results) {
++              newRow.set(name, typ);
++            }
++            return new TCS.TypingResult(newExpr, new TS.TTable(newRow, l, false), outCtx);
++          });
++        });
++      }
+       default:
+         throw new InternalCompilerError('No cases matched in synthesis for ' + e.$name);
+     }
+@@ -2548,6 +3250,30 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
+     }
+     case 'a-app': {
+       const { l, ann, args } = inAnn;
++      // Table<{col :: Ann, ...}> / Row<{col :: Ann, ...}> are the surface
++      // syntax for column-precise table/row types (see DESIGN.md): they
++      // parse as an ordinary generic-application annotation whose single
++      // argument is a record annotation, so no grammar changes are needed.
++      // Recognize the built-in Table/Row type-names by their resolved
++      // s-type-global key (not by resolving through aliases: `Table`/`Row`
++      // as bare annotations still resolve to Any via the base environment,
++      // for backward compatibility with untyped/dynamic table code).
++      if (ann.$name === 'a-name' && args.length === 1 && args[0].$name === 'a-record') {
++        const headKey = ann.id.key();
++        if (headKey === 'tglobal#Table' || headKey === 'tglobal#Row') {
++          return toType(args[0], context).bind((maybeRecordTyp, ctx) => {
++            if (maybeRecordTyp === undefined || maybeRecordTyp.$name !== 't-record') {
++              return new TCS.FoldErrors<Type | undefined>([new C.CantTypecheck('expected a record of column annotations', l)]);
++            } else {
++              const row = maybeRecordTyp.fields;
++              const result: Type = headKey === 'tglobal#Table'
++                ? new TS.TTable(row, l, false)
++                : new TS.TRow(row, l, false);
++              return new TCS.FoldResult<Type | undefined>(result, ctx);
++            }
++          });
++        }
++      }
+       return toType(ann, context).bind((maybeTyp, ctx) => {
+         if (maybeTyp === undefined) {
+           return new TCS.FoldErrors<Type | undefined>([new C.CantTypecheck('no annotation provided on ' + toRepr(ann), l)]);
+diff --git a/lang/src/ts-compiler/src/type-defaults.ts b/lang/src/ts-compiler/src/type-defaults.ts
+index d7e1c579e..98bdedad9 100644
+--- a/lang/src/ts-compiler/src/type-defaults.ts
++++ b/lang/src/ts-compiler/src/type-defaults.ts
+@@ -123,6 +123,14 @@ export function makeDefaultTypes(): Map<string, Type> {
+   defaultTyps.set('makeSome', tForall([tva], tArrow([tva], tOptionApp(tva))));
+   defaultTyps.set('makeNone', tForall([tva], tArrow([], tOptionApp(tva))));
+   defaultTyps.set('checkWrapBoolean', tArrow([tBoolean], tBoolean));
++  // Bracket indexing (`expr[key]`, desugar.ts's s-bracket case) had no
++  // entry here at all, so any use of bracket syntax under -type-check
++  // crashed the compiler (lookupId's fallthrough to UnboundId, whose
++  // renderer assumes an s-id-shaped expr, not this prim-app -- a second,
++  // narrower bug this avoids triggering). Bracket access has no static
++  // safety in Pyret (it's a fully dynamic runtime dispatch), so Any is the
++  // honest type for both its arguments and its result.
++  defaultTyps.set('getBracket', tArrow([tSrcloc, tTop, tTop], tTop));
+   defaultTyps.set('checkTupleBind', tArrow([tTop, tNumber, tSrcloc], tBot));
+   defaultTyps.set('throwNonBooleanCondition', tArrow([tSrcloc, tString, tTop], tBot));
+   defaultTyps.set('throwNoBranchesMatched', tArrow([tSrcloc, tString], tBot));
+diff --git a/lang/src/ts-compiler/src/type-structs.ts b/lang/src/ts-compiler/src/type-structs.ts
+index a95e3f0f9..7508e7f37 100644
+--- a/lang/src/ts-compiler/src/type-structs.ts
++++ b/lang/src/ts-compiler/src/type-structs.ts
+@@ -305,6 +305,14 @@ export abstract class TypeBase {
+         const newFields = typeMemberMap(self.fields, (_, fieldType) => fieldType.substitute(newType, typeVar));
+         return new TRecord(newFields, self.l, self.inferred);
+       }
++      case 't-table': {
++        const newRow = typeMemberMap(self.row, (_, colType) => colType.substitute(newType, typeVar));
++        return new TTable(newRow, self.l, self.inferred);
++      }
++      case 't-row': {
++        const newRow = typeMemberMap(self.row, (_, colType) => colType.substitute(newType, typeVar));
++        return new TRow(newRow, self.l, self.inferred);
++      }
+       case 't-tuple':
+         return new TTuple(self.elts.map((e) => e.substitute(newType, typeVar)), self.l, self.inferred);
+       case 't-forall': {
+@@ -383,6 +391,14 @@ export abstract class TypeBase {
+         }
+         return free;
+       }
++      case 't-table':
++      case 't-row': {
++        let free: TypeSet = new Map();
++        for (const key of self.row.keys()) {
++          free = typeSetUnion(free, mapGetValue(self.row, key).freeVariables());
++        }
++        return free;
++      }
+       case 't-tuple': {
+         let free: TypeSet = new Map();
+         for (const elt of self.elts) {
+@@ -420,6 +436,9 @@ export abstract class TypeBase {
+         return true;
+       case 't-record':
+         return sdAll((key) => mapGetValue(self.fields, key).hasVariableFree(varType), self.fields);
++      case 't-table':
++      case 't-row':
++        return sdAll((key) => mapGetValue(self.row, key).hasVariableFree(varType), self.row);
+       case 't-tuple':
+         return self.elts.every((e) => e.hasVariableFree(varType));
+       case 't-forall':
+@@ -473,6 +492,13 @@ export abstract class TypeBase {
+         // insertion order, which would break that invariant and let a key()-keyed
+         // TypeSet hold duplicates; sort so key() stays a function of contents.
+         return '{' + [...self.fields.keys()].sort().map((key) => key + ' :: ' + mapGetValue(self.fields, key).key()).join(', ') + '}';
++      case 't-table':
++        // Column order is not part of a table type's identity for subtyping
++        // purposes (see the width-subtyping rule in solveHelperConstraints),
++        // so, like t-record, sort column names for a canonical key().
++        return 'Table<{' + [...self.row.keys()].sort().map((key) => key + ' :: ' + mapGetValue(self.row, key).key()).join(', ') + '}>';
++      case 't-row':
++        return 'Row<{' + [...self.row.keys()].sort().map((key) => key + ' :: ' + mapGetValue(self.row, key).key()).join(', ') + '}>';
+       case 't-tuple':
+         return '{'
+           + self.elts.map((elt) => elt.key()).join('; ')
+@@ -509,6 +535,10 @@ export abstract class TypeBase {
+         return new TBot(self.l, inferred);
+       case 't-record':
+         return new TRecord(self.fields, self.l, inferred);
++      case 't-table':
++        return new TTable(self.row, self.l, inferred);
++      case 't-row':
++        return new TRow(self.row, self.l, inferred);
+       case 't-tuple':
+         return new TTuple(self.elts, self.l, inferred);
+       case 't-forall':
+@@ -540,6 +570,10 @@ export abstract class TypeBase {
+         return new TBot(loc, self.inferred);
+       case 't-record':
+         return new TRecord(typeMemberMap(self.fields, (_, fieldType) => sl(fieldType)), loc, self.inferred);
++      case 't-table':
++        return new TTable(typeMemberMap(self.row, (_, colType) => sl(colType)), loc, self.inferred);
++      case 't-row':
++        return new TRow(typeMemberMap(self.row, (_, colType) => sl(colType)), loc, self.inferred);
+       case 't-tuple':
+         return new TTuple(self.elts.map(sl), loc, self.inferred);
+       case 't-forall':
+@@ -593,6 +627,18 @@ export abstract class TypeBase {
+         }
+         return false;
+       }
++      case 't-table': {
++        if (other.$name === 't-table') {
++          return typeMembersEquals(self.row, other.row);
++        }
++        return false;
++      }
++      case 't-row': {
++        if (other.$name === 't-row') {
++          return typeMembersEquals(self.row, other.row);
++        }
++        return false;
++      }
+       case 't-tuple': {
+         if (other.$name === 't-tuple') {
+           return typeListEquals(self.elts, other.elts);
+@@ -668,6 +714,14 @@ export abstract class TypeBase {
+           return '{'
+             + [...typ.fields.keys()].map((key) => typeMemberOutput(key, mapGetValue(typ.fields, key))).join(', ')
+             + '}';
++        case 't-table':
++          return 'Table<{'
++            + [...typ.row.keys()].map((key) => typeMemberOutput(key, mapGetValue(typ.row, key))).join(', ')
++            + '}>';
++        case 't-row':
++          return 'Row<{'
++            + [...typ.row.keys()].map((key) => typeMemberOutput(key, mapGetValue(typ.row, key))).join(', ')
++            + '}>';
+         case 't-tuple':
+           return '{'
+             + typ.elts.map(h).join('; ')
+@@ -772,6 +826,33 @@ export class TRecord extends TypeBase {
+   ) { super(); }
+ }
+ 
++// A table type with a statically-known column schema: `row` maps column
++// name -> column (cell) type. Subtyping is width-based (see
++// solveHelperConstraints): a table with more known columns is a subtype of
++// one that requires fewer, and column order is not part of its identity.
++// See DESIGN.md for the surface syntax (`Table<{col :: Ann, ...}>`).
++export class TTable extends TypeBase {
++  get $name(): 't-table' { return 't-table'; }
++  constructor(
++    public row: TypeMembers,
++    public l: Loc,
++    public inferred: boolean,
++  ) { super(); }
++}
++
++// A row type, i.e. the type of a single table row with a statically-known
++// column schema (as produced by `row-n`, `all-rows()`'s element type,
++// `t.row(...)`, or a `Row<{...}>` annotation). Same width-subtyping
++// discipline as TTable.
++export class TRow extends TypeBase {
++  get $name(): 't-row' { return 't-row'; }
++  constructor(
++    public row: TypeMembers,
++    public l: Loc,
++    public inferred: boolean,
++  ) { super(); }
++}
++
+ export class TTuple extends TypeBase {
+   get $name(): 't-tuple' { return 't-tuple'; }
+   constructor(
+@@ -835,6 +916,8 @@ export type Type =
+   | TTop
+   | TBot
+   | TRecord
++  | TTable
++  | TRow
+   | TTuple
+   | TForall
+   | TRef
+@@ -848,6 +931,8 @@ export function isTApp(x: any): x is TApp { return x instanceof TApp; }
+ export function isTTop(x: any): x is TTop { return x instanceof TTop; }
+ export function isTBot(x: any): x is TBot { return x instanceof TBot; }
+ export function isTRecord(x: any): x is TRecord { return x instanceof TRecord; }
++export function isTTable(x: any): x is TTable { return x instanceof TTable; }
++export function isTRow(x: any): x is TRow { return x instanceof TRow; }
+ export function isTTuple(x: any): x is TTuple { return x instanceof TTuple; }
+ export function isTForall(x: any): x is TForall { return x instanceof TForall; }
+ export function isTRef(x: any): x is TRef { return x instanceof TRef; }
+@@ -879,3 +964,27 @@ export const tArray = (v: Type, l: Loc): Type => new TApp(tArrayName.setLoc(l),
+ export const tOption = (v: Type, l: Loc): Type =>
+   new TApp(new TName(new ModuleUri('builtin://option'), new A.STypeGlobal('Option'), l, false), [v], l, false);
+ export const tTable = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Table'), l, false);
++export const tRow = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Row'), l, false);
++
++// A bare `Table`/`Row` annotation resolves to this opaque nominal t-name
++// (registered as a "data definition" with no declared alias -- see
++// typeCheck()'s global-types setup in type-check.ts, which falls back to a
++// raw TName when a global type has no entry in its defining module's
++// `aliases` map) whenever nothing else pins the value down further, e.g. a
++// bare `t :: Table` function parameter. It is genuinely opaque/columnless
++// (unlike TTable), so type-check.ts's table-method dispatch treats it the
++// same as Any: methods still type-check (for backward compatibility with
++// existing untyped table code) but grant no column-level guarantees. These
++// predicates also let solveHelperConstraints recognize that any
++// known-shape TTable/TRow is a perfectly good "some Table"/"some Row"
++// value (e.g. `stack`'s argument -- see type-check.ts).
++export function isOpaqueTableName(t: Type): boolean {
++  return t.$name === 't-name' && t.moduleName.$name === 'module-uri' && t.moduleName.uri === builtinUri.uri && t.id.key() === new A.STypeGlobal('Table').key();
++}
++export function isOpaqueRowName(t: Type): boolean {
++  return t.$name === 't-name' && t.moduleName.$name === 'module-uri' && t.moduleName.uri === builtinUri.uri && t.id.key() === new A.STypeGlobal('Row').key();
++}
++
++// Column-precise table/row types (see TTable/TRow above and DESIGN.md).
++export const tTableOf = (row: TypeMembers, l: Loc): Type => new TTable(row, l, false);
++export const tRowOf = (row: TypeMembers, l: Loc): Type => new TRow(row, l, false);
