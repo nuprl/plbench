@@ -20,11 +20,13 @@ them in the type checker, and reports on the design.
     needs no credentials); writes `/logs/verifier/reward.txt`.
   - `probes/good`, `probes/bad` — design-agnostic well-typed / ill-typed Pyret
     programs (no table syntax) used to detect a globally vacuous type checker.
-  - `probes/table-good`, `probes/table-bad` — table-soundness probes using
-    Pyret's fixed table surface syntax (`table:`, `.get-column`,
-    `select…from`); the negatives are accepted by a checker that types tables as
-    `Any` and rejected by any real schema-tracking design, catching a
-    submission that passes everything else while doing no real table typing.
+  - `probes/table-bad` — table-soundness probes using Pyret's fixed table
+    surface syntax (`table:`, `.get-column`, `select…from`). Each reads/selects
+    a column absent from a statically known schema; a checker that types tables
+    as `Any` accepts them and any real schema-tracking design rejects them, so
+    they catch a submission that passes everything else while doing no real
+    table typing. They turn on column *existence* (not element-type precision),
+    so they don't penalize second-class/literal-only column-name designs.
   - `judge.toml` — the **subjective** rubric (single source of truth for the
     criteria).
   - `host_judge.py` — host-side rubric grader for credential-light VMs.
@@ -44,9 +46,9 @@ rebuilds; the pre-existing `ts-type-check-test` regression suite still passes
 the design-agnostic probe suite behaves correctly under the agent's own
 `typecheck-example` (well-typed accepted, ill-typed rejected — catching both
 accept-everything and reject-everything wrappers); the table-soundness probes
-are handled correctly (schema-error programs rejected — catching a checker that
-types tables as `Any`); and every typed example type-checks and exercises real
-table vocabulary.
+are rejected (missing-column programs — catching a checker that types tables as
+`Any`); and every typed example type-checks and exercises real table
+vocabulary.
 
 **Subjective** (`judge.toml`, LLM-as-judge): reads `DESIGN.md`, the typed
 examples, and the agent's diff, scoring design soundness, B2T2 alignment,
