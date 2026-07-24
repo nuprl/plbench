@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Type-check a single Pyret program with the (modified) TypeScript compiler.
+#
+#   typecheck-example FILE.arr
+#
+# Exits 0 iff FILE.arr type-checks under the table-aware type checker; exits
+# non-zero (printing the type error) when FILE.arr contains a type error.
+set -u
+if [ "$#" -ne 1 ]; then
+  echo "usage: typecheck-example FILE.arr" >&2
+  exit 2
+fi
+LANGDIR="/app/pyret-lang/lang"
+# Resolve the input to an absolute path: the compiler is run with cwd=LANGDIR
+# (so it can find its own relative runtime assets such as handalone.js).
+FILE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+WORK="$(mktemp -d)"
+OUT="$WORK/out.jarr"
+LOG="$WORK/out.log"
+
+# -type-check runs the (table-aware) type checker as part of compilation. When
+# type-checking fails, the compiler prints the error and exits non-zero (see
+# pyret.ts: main() rejects on "There were compilation errors" -> process.exit(1)).
+( cd "$LANGDIR" && node "$LANGDIR/build/ts-compiler/pyret.js" \
+  -type-check \
+  --build-runnable "$FILE" \
+  --outfile "$OUT" \
+  --builtin-js-dir "$LANGDIR/src/js/trove/" \
+  --builtin-arr-dir "$LANGDIR/src/arr/trove/" \
+  --compiled-dir "$LANGDIR/build/tc-example-compiled/" \
+  --require-config "$LANGDIR/src/scripts/standalone-configA.json" \
+  -no-display-progress ) > "$LOG" 2>&1
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  cat "$LOG"
+  rm -rf "$WORK"
+  exit "$status"
+fi
+
+# Defensive: if a compile error ever slips through with status 0, still report
+# it (keeps the exit-code contract robust across CLI changes).
+if grep -qE "cannot be type-checked|There were compilation errors|Type checking failed|does not have a field|type inconsistency|The run ended in error" "$LOG"; then
+  cat "$LOG"
+  rm -rf "$WORK"
+  exit 1
+fi
+
+rm -rf "$WORK"
+exit 0

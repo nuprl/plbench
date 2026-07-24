@@ -1,0 +1,6 @@
+{
+  "model": "claude-opus-4-8",
+  "objective": 1,
+  "subjective": 0.673,
+  "objective_note": "In-container verifier scored 0 due to the select-missing table probe (tb3), a false negative against Opus sound-but-imprecise select (unknown select column typed as Any, deferred to runtime); tb3 since removed. get-column-existence probe (tb1) rejected; all other checks incl. regression passed. Corrected objective=1."
+}

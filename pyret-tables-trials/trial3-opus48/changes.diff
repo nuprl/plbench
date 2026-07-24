@@ -1,0 +1,809 @@
+diff --git a/lang/package-lock.json b/lang/package-lock.json
+index a16f612e6..dc6f63168 100644
+--- a/lang/package-lock.json
++++ b/lang/package-lock.json
+@@ -42,6 +42,9 @@
+       "devDependencies": {
+         "http-server": "^14.1.1",
+         "jest": "^30.0.4"
++      },
++      "engines": {
++        "node": ">=22.12.0"
+       }
+     },
+     "node_modules/@babel/code-frame": {
+diff --git a/lang/src/ts-compiler/src/compile-errors.ts b/lang/src/ts-compiler/src/compile-errors.ts
+index 729c19620..39ca02ff6 100644
+--- a/lang/src/ts-compiler/src/compile-errors.ts
++++ b/lang/src/ts-compiler/src/compile-errors.ts
+@@ -873,17 +873,26 @@ export class NameNotProvided extends CompileErrorBase {
+ export class UnboundId extends CompileErrorBase {
+   get $name(): 'unbound-id' { return 'unbound-id'; }
+   constructor(public id: A.Expr) { super(); }
++  // The unbound expression is usually an s-id (with an `.id` Name), but can also
++  // be an s-prim-app (whose name lives in `._fun`); fall back gracefully so the
++  // renderer never crashes on an unbound primitive.
++  private idName(): string {
++    const e = this.id as any;
++    if (e.id !== undefined && typeof e.id.toname === 'function') { return e.id.toname(); }
++    if (typeof e._fun === 'string') { return e._fun; }
++    return '<unknown>';
++  }
+   renderFancyReason(): ED.ErrorDisplay {
+     if ((this.id as any).l instanceof Builtin) {
+       return para([
+         text("ERROR: should not be allowed to have a builtin that's unbound:"),
+-        text((this.id as any).id.toname()), text("at"),
++        text(this.idName()), text("at"),
+         drawAndHighlight((this.id as any).l)]);
+     } else {
+       return error([
+         para([
+           text("The name "),
+-          code(highlight(text((this.id as any).id.toname()), [(this.id as any).l], 0)),
++          code(highlight(text(this.idName()), [(this.id as any).l], 0)),
+           text(" is unbound:")]),
+         cmcode((this.id as any).l),
+         para([
+@@ -896,13 +905,13 @@ export class UnboundId extends CompileErrorBase {
+     if ((this.id as any).l instanceof Builtin) {
+       return para([
+         text("ERROR: should not be allowed to have a builtin that's unbound:"),
+-        text((this.id as any).id.toname()),
++        text(this.idName()),
+         drawAndHighlight((this.id as any).l)]);
+     } else {
+       return error([
+         para([
+           text("The name "),
+-          code(text((this.id as any).id.toname())),
++          code(text(this.idName())),
+           text(" at "),
+           edLoc((this.id as any).l),
+           text(" is unbound. It is "),
+diff --git a/lang/src/ts-compiler/src/compile-structs.ts b/lang/src/ts-compiler/src/compile-structs.ts
+index f0c672571..ae19a9503 100644
+--- a/lang/src/ts-compiler/src/compile-structs.ts
++++ b/lang/src/ts-compiler/src/compile-structs.ts
+@@ -1297,8 +1297,8 @@ export const runtimeProvides: Provides = new Provides("builtin://global",
+     ["NumNonPositive", tTop],
+     ["NumNonNegative", tTop],
+     ["String", tStr],
+-    ["Table", tTop],
+-    ["Row", tTop],
++    ["Table", T.tTable(A.dummyLoc)],
++    ["Row", T.tRow(A.dummyLoc)],
+     ["Function", tTop],
+     ["Boolean", tTop],
+     ["Object", tTop],
+diff --git a/lang/src/ts-compiler/src/type-check-structs.ts b/lang/src/ts-compiler/src/type-check-structs.ts
+index 09ff57035..bc28c57cc 100644
+--- a/lang/src/ts-compiler/src/type-check-structs.ts
++++ b/lang/src/ts-compiler/src/type-check-structs.ts
+@@ -795,6 +795,81 @@ export function addSubstitution(newType: Type, typeVar: Type, system: Constraint
+   };
+ }
+ 
++// Classify a type as a schema-carrying Table/Row for subtyping purposes.
++// Returns its kind and schema record (undefined = unknown/bare schema), or
++// undefined if the type is neither a Table nor a Row.
++function tableRowKindAndArg(t: Type): { kind: 'table' | 'row'; schema: TS.TRecord | undefined } | undefined {
++  const named = (x: Type, n: string): boolean =>
++    x.$name === 't-name' && A.isSTypeGlobal(x.id) && x.id.s === n;
++  if (named(t, 'Table')) { return { kind: 'table', schema: undefined }; }
++  if (named(t, 'Row')) { return { kind: 'row', schema: undefined }; }
++  if (t.$name === 't-app' && t.args.length === 1) {
++    const kind = named(t.onto, 'Table') ? 'table' : named(t.onto, 'Row') ? 'row' : undefined;
++    if (kind !== undefined) {
++      const arg = t.args[0];
++      return { kind, schema: arg.$name === 't-record' ? arg : undefined };
++    }
++  }
++  return undefined;
++}
++
++// A record of the runtime methods (and raw accessors) available on a Table or
++// Row, given its (possibly unknown) schema.  This is the *conservative* view
++// used whenever a table/row is reached through inference (e.g. a polymorphic
++// accumulator) rather than syntactically; the precise, argument-aware typing of
++// table method calls lives in type-check.ts (synthesisTableMethod).  Row column
++// access is included as ordinary fields so `r.col` resolves in generic contexts.
++export function tableRowMethodRecord(kind: 'table' | 'row', schema: TS.TRecord | undefined, l: Loc): TS.TRecord {
++  const num = TS.tNumber(l);
++  const str = TS.tString(l);
++  const bool = TS.tBoolean(l);
++  const top = new TS.TTop(l, false);
++  const arr = (v: Type): Type => TS.tArray(v, l);
++  const list = (v: Type): Type => TD.tListApp(v);
++  const arrow = (as: Type[], r: Type): Type => new TS.TArrow(as, r, l, false);
++  const rowT: Type = schema === undefined ? TS.tRow(l) : new TS.TApp(TS.tRow(l), [schema], l, false);
++  const tableT: Type = schema === undefined ? TS.tTable(l) : new TS.TApp(TS.tTable(l), [schema], l, false);
++  const fields: Map<string, Type> = new Map();
++  if (kind === 'row') {
++    fields.set('get-value', arrow([str], top));
++    fields.set('get', arrow([str], TS.tOption(top, l)));
++    fields.set('get-column-names', arrow([], list(str)));
++    if (schema !== undefined) {
++      for (const [k, v] of schema.fields) { fields.set(k, v); }
++    }
++    return new TS.TRecord(fields, l, false);
++  }
++  fields.set('row-n', arrow([num], rowT));
++  fields.set('all-rows', arrow([], list(rowT)));
++  fields.set('length', arrow([], num));
++  fields.set('column-names', arrow([], list(str)));
++  fields.set('get-column', arrow([str], list(top)));
++  fields.set('column', arrow([str], list(top)));
++  fields.set('column-n', arrow([num], list(top)));
++  fields.set('order-by', arrow([str, bool], tableT));
++  fields.set('increasing-by', arrow([str], tableT));
++  fields.set('decreasing-by', arrow([str], tableT));
++  fields.set('drop', arrow([str], TS.tTable(l)));
++  fields.set('build-column', arrow([str, arrow([rowT], top)], TS.tTable(l)));
++  fields.set('add-column', arrow([str, list(top)], TS.tTable(l)));
++  fields.set('transform-column', arrow([str, arrow([rowT], top)], TS.tTable(l)));
++  fields.set('rename-column', arrow([str, str], TS.tTable(l)));
++  fields.set('stack', arrow([tableT], tableT));
++  fields.set('add-row', arrow([rowT], tableT));
++  fields.set('filter', arrow([arrow([rowT], bool)], tableT));
++  fields.set('filter-by', arrow([str, arrow([top], bool)], tableT));
++  fields.set('empty', arrow([], tableT));
++  fields.set('select-columns', arrow([list(str)], TS.tTable(l)));
++  fields.set('multi-order', arrow([top], tableT));
++  fields.set('order-by-columns', arrow([top], tableT));
++  fields.set('reduce', arrow([str, top], top));
++  fields.set('_column-index', arrow([top, top, str, top], num));
++  fields.set('_no-column', arrow([top], top));
++  fields.set('_header-raw-array', arr(str));
++  fields.set('_rows-raw-array', arr(arr(top)));
++  return new TS.TRecord(fields, l, false);
++}
++
+ export function solveHelperConstraints(system: AnyConstraintSystem, solution: ConstraintSolution, context: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> {
+   const addSubstitutionAndContinue = (newType: Type, typeVar: Type, system2: ConstraintSystem, solution2: ConstraintSolution, context2: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> => {
+     const newSolutionAndSystem = addSubstitution(newType, typeVar, system2, solution2);
+@@ -817,6 +892,23 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
+       if ((supertype.$name as string) === 't-top' || (subtype.$name as string) === 't-bot') {
+         return solveHelperConstraints(shadowSystem, solution, context);
+       }
++      // Schema-carrying Table/Row subtyping.  A table/row with a known schema is
++      // a subtype of the bare `Table`/`Row` (schema forgotten), and two known
++      // schemas relate by (covariant, width) record subtyping — sound because
++      // tables and rows are immutable.
++      {
++        const tblSub = tableRowKindAndArg(subtype);
++        const tblSuper = tableRowKindAndArg(supertype);
++        if (tblSub !== undefined && tblSuper !== undefined && tblSub.kind === tblSuper.kind) {
++          if (tblSuper.schema === undefined) {
++            return solveHelperConstraints(shadowSystem, solution, context);
++          }
++          if (tblSub.schema === undefined) {
++            return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
++          }
++          return solveHelperConstraints(shadowSystem.addConstraint(tblSub.schema, tblSuper.schema), solution, context);
++        }
++      }
+       switch (supertype.$name) {
+         case 't-existential': {
+           switch (subtype.$name) {
+@@ -1536,6 +1628,11 @@ export function maintainCommonStructure(struct: Structure, typ: Type): Type {
+ // data type shapes: t-name, t-app(t-name), t-data-refinement(data type shape)
+ export function instantiateObjectType(typ: Type, context: Context): AnyFoldResult<Type> {
+   const resolved = resolveAlias(typ, context);
++  // A Table/Row presents as a record of its methods (and, for rows, columns).
++  const tableRow = tableRowKindAndArg(resolved);
++  if (tableRow !== undefined) {
++    return new FoldResult<Type>(tableRowMethodRecord(tableRow.kind, tableRow.schema, resolved.l), context);
++  }
+   switch (resolved.$name) {
+     case 't-name':
+       return new FoldResult<Type>(resolved, context);
+diff --git a/lang/src/ts-compiler/src/type-check.ts b/lang/src/ts-compiler/src/type-check.ts
+index a08619e26..c46aae0f7 100644
+--- a/lang/src/ts-compiler/src/type-check.ts
++++ b/lang/src/ts-compiler/src/type-check.ts
+@@ -18,6 +18,7 @@ import * as SL from './srcloc';
+ import * as AU from './ast-util';
+ import * as TS from './type-structs';
+ import * as TCS from './type-check-structs';
++import * as TD from './type-defaults';
+ import * as C from './compile-structs';
+ import {
+   InternalCompilerError,
+@@ -852,12 +853,22 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
+         return raise('synthesis for s-construct not implemented');
+       case 's-app': {
+         const { l, _fun, args } = e;
++        if (_fun.$name === 's-dot') {
++          return synthesisDotApp(l, _fun, args, topLevel, context);
++        }
+         return synthesisAppFun(l, _fun, args, context)
+           .typingBind((funType, ctx) =>
+             synthesisSpine(funType, (exprs) => new A.SApp(l, _fun, exprs), args, l, ctx));
+       }
+       case 's-prim-app': {
+         const { l, _fun, args, appInfo } = e;
++        if (_fun === 'makeTable') {
++          const tableResult = synthesisMakeTable(l, args, appInfo, context);
++          if (tableResult !== undefined) { return tableResult; }
++        } else if (_fun === 'getBracket') {
++          const bracketResult = synthesisGetBracket(e, l, args, appInfo, context);
++          if (bracketResult !== undefined) { return bracketResult; }
++        }
+         return lookupId(l, _fun, e, context).typingBind((arrowType, ctx) =>
+           synthesisSpine(arrowType, (exprs) => new A.SPrimApp(l, _fun, exprs, appInfo), args, l, ctx)
+             .mapType((t) => t.setLoc(l)));
+@@ -1637,7 +1648,538 @@ export function trackBranches(dataType: DataType): { remove: (b: TypeVariant) =>
+   };
+ }
+ 
++// ============================================================================
++//  Schema-carrying Table / Row types
++//
++//  A table's schema is modelled as a record type mapping column names to the
++//  element type of that column.  A whole table is `Table<{c1 :: T1, ...}>`,
++//  represented as TApp(Table, [TRecord]); a row of that table is
++//  `Row<{c1 :: T1, ...}>` = TApp(Row, [TRecord]).  A bare `Table` / `Row`
++//  (a plain t-name, no app) denotes an unknown schema — the conservative
++//  "some table" used for data from unknown sources or dynamic column names.
++//
++//  These types are attached purely during type-checking; the generated code
++//  and runtime are untouched.  Table syntax desugars into `makeTable` prim-apps
++//  and runtime method calls *before* type-checking, so we recover the schema by
++//  (a) reading the literal header strings + cell types of a `makeTable` call and
++//  (b) giving precise result types to the runtime table/row methods, keying off
++//  literal string column-name arguments.
++// ============================================================================
++
++const tTop0 = (l: Loc): Type => new TS.TTop(l, false);
++
++function isTypeGlobalNamed(t: Type, name: string): boolean {
++  return t.$name === 't-name' && A.isSTypeGlobal(t.id) && t.id.s === name;
++}
++
++type TableKind = 'table' | 'row';
++interface TableInfo { kind: TableKind; schema: TS.TRecord | undefined; }
++
++// Classify a type as a Table/Row (with an optional known schema record), or
++// return undefined if it is neither.
++function tableRowInfo(t0: Type, context: Context): TableInfo | undefined {
++  const t = TCS.resolveAlias(t0, context);
++  if (isTypeGlobalNamed(t, 'Table')) { return { kind: 'table', schema: undefined }; }
++  if (isTypeGlobalNamed(t, 'Row')) { return { kind: 'row', schema: undefined }; }
++  if (t.$name === 't-app' && t.args.length === 1) {
++    const onto = TCS.resolveAlias(t.onto, context);
++    const kind: TableKind | undefined =
++      isTypeGlobalNamed(onto, 'Table') ? 'table'
++      : isTypeGlobalNamed(onto, 'Row') ? 'row'
++      : undefined;
++    if (kind !== undefined) {
++      const arg = t.args[0];
++      return { kind, schema: arg.$name === 't-record' ? arg : undefined };
++    }
++  }
++  return undefined;
++}
++
++function mkTableType(schema: TS.TRecord, l: Loc): Type {
++  return new TS.TApp(TS.tTable(l), [schema], l, false);
++}
++function mkRowType(schema: TS.TRecord, l: Loc): Type {
++  return new TS.TApp(TS.tRow(l), [schema], l, false);
++}
++// A table/row type of unknown schema (or with the given schema if present).
++function tableTypeOf(schema: TS.TRecord | undefined, l: Loc): Type {
++  return schema === undefined ? TS.tTable(l) : mkTableType(schema, l);
++}
++function rowTypeOf(schema: TS.TRecord | undefined, l: Loc): Type {
++  return schema === undefined ? TS.tRow(l) : mkRowType(schema, l);
++}
++const tListApp = (a: Type): Type => TD.tListApp(a);
++const tStr0 = (l: Loc): Type => TS.tString(l);
++
++function stringLitValue(e: Expr): string | undefined {
++  return e.$name === 's-str' ? e.s : undefined;
++}
++
++function renderSchema(schema: TS.TRecord): string {
++  return schema.toString();
++}
++
++// Least upper bound used to infer an un-annotated column's type from its cells.
++// Sound rule: identical types collapse; anything else widens to a supertype.
++// When two cells have distinct *closed* builtin scalar types we treat that as a
++// malformed-table error (the b2t2 "swappedColumns"/constant-error family),
++// otherwise we widen to Any.
++function inferColumnType(cellTypes: Type[], colName: string, l: Loc): Type | C.CompileError {
++  if (cellTypes.length === 0) { return tTop0(l); }
++  const isScalar = (t: Type): boolean => t.$name === 't-name';
++  let allEqual = true;
++  for (let i = 1; i < cellTypes.length; i++) {
++    if (!cellTypes[0].equals(cellTypes[i])) { allEqual = false; break; }
++  }
++  if (allEqual) { return cellTypes[0].setLoc(l); }
++  // Not homogeneous: look for a concrete scalar conflict to report helpfully.
++  let scalar: Type | undefined = undefined;
++  for (const t of cellTypes) {
++    if (isScalar(t)) {
++      if (scalar === undefined) { scalar = t; }
++      else if (!scalar.equals(t)) {
++        return new C.CantTypecheck(
++          "the column `" + colName + "` is not homogeneous: it mixes values of type "
++          + scalar.toString() + " and " + t.toString()
++          + " (each table column must contain values of a single type)",
++          t.l.$name === 'builtin' ? l : t.l);
++      }
++    }
++  }
++  return tTop0(l);
++}
++
++// Synthesize the schema + Table type of a desugared `makeTable(headers, rows)`
++// prim-app.  Returns undefined to signal "not a literal table" so the caller
++// falls back to the default (opaque) makeTable typing.
++function synthesisMakeTable(l: Loc, args: Expr[], appInfo: A.PrimAppInfo, context: Context): AnyTypingResult | undefined {
++  if (args.length !== 2) { return undefined; }
++  const headersArg = args[0];
++  const rowsArg = args[1];
++  if (headersArg.$name !== 's-array' || rowsArg.$name !== 's-array') { return undefined; }
++  const names: string[] = [];
++  for (const h of headersArg.values) {
++    const n = stringLitValue(h);
++    if (n === undefined) { return undefined; }
++    names.push(n);
++  }
++  // Duplicate column names are forbidden (b2t2: columns are distinct).
++  const seen = new Set<string>();
++  for (const n of names) {
++    if (seen.has(n)) {
++      return new TCS.TypingError([new C.CantTypecheck(
++        "the table declares the column `" + n + "` more than once (column names must be distinct)", l)]);
++    }
++    seen.add(n);
++  }
++  const rowExprs = rowsArg.values;
++  // Synthesize every cell, threading the context, and check rectangularity.
++  const cellTypesByCol: Type[][] = names.map(() => []);
++  let ctx = context;
++  const newRowAsts: Expr[] = [];
++  for (const rowE of rowExprs) {
++    if (rowE.$name !== 's-array') { return undefined; }
++    if (rowE.values.length !== names.length) {
++      return new TCS.TypingError([new C.CantTypecheck(
++        "this row has " + rowE.values.length + " cells but the table has "
++        + names.length + " columns", rowE.l)]);
++    }
++    const newCells: Expr[] = [];
++    for (let j = 0; j < names.length; j++) {
++      const res = synthesis(rowE.values[j], false, ctx);
++      if (TCS.isTypingError(res)) { return res; }
++      const r = res as TCS.TypingResult;
++      cellTypesByCol[j].push(r.typ);
++      newCells.push(r.ast);
++      ctx = r.outContext;
++    }
++    newRowAsts.push(new A.SArray(rowE.l, newCells));
++  }
++  // Build the schema record.
++  const fields: TypeMembers = new Map();
++  for (let j = 0; j < names.length; j++) {
++    const ct = inferColumnType(cellTypesByCol[j], names[j], l);
++    if (ct instanceof C.CompileErrorBase) {
++      return new TCS.TypingError([ct as unknown as C.CompileError]);
++    }
++    fields.set(names[j], ct as Type);
++  }
++  const schema = new TS.TRecord(fields, l, false);
++  const newAst = new A.SPrimApp(l, 'makeTable',
++    [new A.SArray(headersArg.l, headersArg.values), new A.SArray(rowsArg.l, newRowAsts)], appInfo);
++  return new TCS.TypingResult(newAst, mkTableType(schema, l), ctx);
++}
++
++// Special typing for `getBracket(srcloc, obj, key)` (desugared `obj[key]`):
++// on a Row with a literal column-name key, produce the column's type.
++function synthesisGetBracket(e: A.SPrimApp, l: Loc, args: Expr[], appInfo: A.PrimAppInfo, context: Context): AnyTypingResult | undefined {
++  if (args.length !== 3) { return undefined; }
++  const objRes = synthesis(args[1], false, context);
++  if (TCS.isTypingError(objRes)) { return objRes; }
++  const objR = objRes as TCS.TypingResult;
++  const info = tableRowInfo(objR.typ, objR.outContext);
++  if (info === undefined) { return undefined; }
++  const keyRes = synthesis(args[2], false, objR.outContext);
++  if (TCS.isTypingError(keyRes)) { return keyRes; }
++  const keyR = keyRes as TCS.TypingResult;
++  const rebuild = (t: Type, ctx: Context): AnyTypingResult =>
++    new TCS.TypingResult(new A.SPrimApp(l, e._fun, [args[0], objR.ast, keyR.ast], appInfo), t.setLoc(l), ctx);
++  const lit = stringLitValue(args[2]);
++  if (info.schema === undefined || lit === undefined) {
++    return rebuild(tTop0(l), keyR.outContext);
++  }
++  const colType = info.schema.fields.get(lit);
++  if (colType === undefined) {
++    return new TCS.TypingError([new C.CantTypecheck(
++      "the row has no column named `" + lit + "`; its columns are "
++      + renderSchema(info.schema), l)]);
++  }
++  return rebuild(colType, keyR.outContext);
++}
++
++// Field access on a Table/Row that is NOT an immediate method call:
++// row column access `r.col`, and the desugared raw accessors on a table.
++function synthesisTableField(accessLoc: Loc, obj: Expr, info: TableInfo, fieldName: string, recreate: (l: Loc, obj: Expr, field: string) => Expr, context: Context): AnyTypingResult | undefined {
++  const ok = (t: Type): AnyTypingResult =>
++    new TCS.TypingResult(recreate(accessLoc, obj, fieldName), t.setLoc(accessLoc), context);
++  if (info.kind === 'row') {
++    if (info.schema === undefined) { return ok(tTop0(accessLoc)); }
++    const colType = info.schema.fields.get(fieldName);
++    if (colType === undefined) {
++      return new TCS.TypingError([new C.CantTypecheck(
++        "the row has no column named `" + fieldName + "`; its columns are "
++        + renderSchema(info.schema), accessLoc)]);
++    }
++    return ok(colType);
++  }
++  // Table: the desugared runtime accessors used by table sugar.
++  switch (fieldName) {
++    case '_header-raw-array': return ok(TS.tArray(tStr0(accessLoc), accessLoc));
++    case '_rows-raw-array': return ok(TS.tArray(TS.tArray(tTop0(accessLoc), accessLoc), accessLoc));
++    default: return undefined;
++  }
++}
++
++// Check a function argument against `(Row<schema> -> V)` and return V.
++function checkRowFunction(fnArg: Expr, schema: TS.TRecord | undefined, l: Loc, context: Context): { ret: Type; ast: Expr; ctx: Context } | TCS.TypingError {
++  const v = newExistential(l, false);
++  const rowT = rowTypeOf(schema, l);
++  const expected = new TS.TArrow([rowT], v, l, false);
++  const ctx0 = context.addVariable(v);
++  const res = checking(fnArg, expected, false, ctx0);
++  if (TCS.isTypingError(res)) { return res; }
++  const r = res as TCS.TypingResult;
++  return { ret: v, ast: r.ast, ctx: r.outContext };
++}
++
++// Type a table/row method call `obj.method(args)` given obj already synthesized.
++// Returns null for methods this precise pass does not model, so the caller can
++// fall back to the generic method-record path.
++function synthesisTableMethod(l: Loc, funDot: A.SDot, objAst: Expr, info: TableInfo, args: Expr[], context: Context): AnyTypingResult | null {
++  const method = funDot.field;
++  const schema = info.schema;
++  const rebuiltFun = (newObj: Expr): A.SDot => new A.SDot(funDot.l, newObj, method);
++  const result = (argAsts: Expr[], typ: Type, ctx: Context): AnyTypingResult =>
++    new TCS.TypingResult(new A.SApp(l, rebuiltFun(objAst), argAsts), typ.setLoc(l), ctx);
++  const err = (msg: string): AnyTypingResult => new TCS.TypingError([new C.CantTypecheck(msg, l)]);
++
++  // Check every argument by synthesis (default), collecting new ASTs.
++  const synthAll = (): { asts: Expr[]; typs: Type[]; ctx: Context } | TCS.TypingError => {
++    const asts: Expr[] = []; const typs: Type[] = []; let ctx = context;
++    for (const a of args) {
++      const res = synthesis(a, false, ctx);
++      if (TCS.isTypingError(res)) { return res; }
++      const r = res as TCS.TypingResult;
++      asts.push(r.ast); typs.push(r.typ); ctx = r.outContext;
++    }
++    return { asts, typs, ctx };
++  };
++  // Resolve a column-name argument against the (possibly unknown) schema.
++  // Returns { type } for a known column, { dynamic: true } when we cannot know
++  // the exact column (unknown schema or non-literal name), or an error.
++  const columnArg = (arg: Expr): { type?: Type; dynamic?: boolean; name?: string; err?: C.CompileError } => {
++    const lit = stringLitValue(arg);
++    if (schema === undefined || lit === undefined) { return { dynamic: true, name: lit }; }
++    const ct = schema.fields.get(lit);
++    if (ct === undefined) {
++      return { err: new C.CantTypecheck(
++        "the table has no column named `" + lit + "`; its columns are " + renderSchema(schema), arg.l) };
++    }
++    return { type: ct, name: lit };
++  };
++
++  const arity = (n: number): boolean => args.length === n;
++
++  // Rows only support row methods; anything else falls back to the generic
++  // record (which will reject a table method on a row).
++  if (info.kind === 'row') {
++    switch (method) {
++      case 'get-value':
++      case 'get': {
++        if (!arity(1)) { return err(method + " expects 1 argument (a column name)"); }
++        const lit = stringLitValue(args[0]);
++        const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++        const ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++        let elt: Type = tTop0(l);
++        if (schema !== undefined && lit !== undefined) {
++          const ct = schema.fields.get(lit);
++          if (ct === undefined) {
++            return err("the row has no column named `" + lit + "`; its columns are " + renderSchema(schema));
++          }
++          elt = ct;
++        }
++        return result(s.asts, method === 'get' ? TS.tOption(elt, l) : elt, ctx);
++      }
++      case 'get-column-names': {
++        if (!arity(0)) { return err("get-column-names expects no arguments"); }
++        return result([], tListApp(tStr0(l)), context);
++      }
++      default: return null;
++    }
++  }
++
++  // info.kind === 'table'
++  switch (method) {
++    // ---- schema-independent shape/observers ----
++    case 'row-n': {
++      if (!arity(1)) { return err("row-n expects 1 argument"); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      const ctx = s.ctx.addConstraint(s.typs[0], TS.tNumber(args[0].l));
++      return result(s.asts, rowTypeOf(schema, l), ctx);
++    }
++    case 'all-rows': {
++      if (!arity(0)) { return err("all-rows expects no arguments"); }
++      return result([], tListApp(rowTypeOf(schema, l)), context);
++    }
++    case 'length': {
++      if (!arity(0)) { return err("length expects no arguments"); }
++      return result([], TS.tNumber(l), context);
++    }
++    case 'column-names': {
++      if (!arity(0)) { return err("column-names expects no arguments"); }
++      return result([], tListApp(tStr0(l)), context);
++    }
++    case 'empty': {
++      if (!arity(0)) { return err("empty expects no arguments"); }
++      return result([], tableTypeOf(schema, l), context);
++    }
++    // ---- column extraction ----
++    case 'column':
++    case 'get-column': {
++      if (!arity(1)) { return err(method + " expects 1 argument (a column name)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      const ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++      const elt = ca.type !== undefined ? ca.type : tTop0(l);
++      return result(s.asts, tListApp(elt), ctx);
++    }
++    case 'column-n': {
++      if (!arity(1)) { return err("column-n expects 1 argument"); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      const ctx = s.ctx.addConstraint(s.typs[0], TS.tNumber(args[0].l));
++      return result(s.asts, tListApp(tTop0(l)), ctx);
++    }
++    // ---- row-preserving reorderings / filters ----
++    case 'order-by': {
++      if (!arity(2)) { return err("order-by expects 2 arguments (column name, ascending?)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      let ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++      ctx = ctx.addConstraint(s.typs[1], TS.tBoolean(args[1].l));
++      return result(s.asts, tableTypeOf(schema, l), ctx);
++    }
++    case 'increasing-by':
++    case 'decreasing-by': {
++      if (!arity(1)) { return err(method + " expects 1 argument (a column name)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      const ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++      return result(s.asts, tableTypeOf(schema, l), ctx);
++    }
++    case 'filter': {
++      if (!arity(1)) { return err("filter expects 1 argument (a predicate on rows)"); }
++      const v = newExistential(args[0].l, false);
++      const expected = new TS.TArrow([rowTypeOf(schema, l)], TS.tBoolean(args[0].l), args[0].l, false);
++      void v;
++      const res = checking(args[0], expected, false, context);
++      if (TCS.isTypingError(res)) { return res; }
++      const r = res as TCS.TypingResult;
++      return result([r.ast], tableTypeOf(schema, l), r.outContext);
++    }
++    case 'filter-by': {
++      if (!arity(2)) { return err("filter-by expects 2 arguments (column name, predicate)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const ctx0 = r0.outContext.addConstraint(r0.typ, tStr0(args[0].l));
++      const elt = ca.type !== undefined ? ca.type : tTop0(l);
++      const expected = new TS.TArrow([elt], TS.tBoolean(args[1].l), args[1].l, false);
++      const res = checking(args[1], expected, false, ctx0);
++      if (TCS.isTypingError(res)) { return res; }
++      const r1 = res as TCS.TypingResult;
++      return result([r0.ast, r1.ast], tableTypeOf(schema, l), r1.outContext);
++    }
++    case 'stack': {
++      if (!arity(1)) { return err("stack expects 1 argument (another table)"); }
++      // Runtime `stack` requires the two tables to have exactly the same set of
++      // columns, so the argument's schema must EQUAL (not merely subtype) this
++      // table's -- enforced with bidirectional constraints.
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const target = tableTypeOf(schema, l);
++      const ctx = r0.outContext.addConstraint(r0.typ, target).addConstraint(target, r0.typ);
++      return result([r0.ast], tableTypeOf(schema, l), ctx);
++    }
++    case 'add-row': {
++      if (!arity(1)) { return err("add-row expects 1 argument (a row)"); }
++      // Likewise, the row must have exactly this table's columns.
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const target = rowTypeOf(schema, l);
++      const ctx = r0.outContext.addConstraint(r0.typ, target).addConstraint(target, r0.typ);
++      return result([r0.ast], tableTypeOf(schema, l), ctx);
++    }
++    // ---- schema-changing operations ----
++    case 'drop': {
++      if (!arity(1)) { return err("drop expects 1 argument (a column name)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      const ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++      if (schema === undefined || ca.name === undefined) {
++        return result(s.asts, TS.tTable(l), ctx);
++      }
++      const fields: TypeMembers = new Map();
++      for (const [k, v] of schema.fields) { if (k !== ca.name) { fields.set(k, v); } }
++      return result(s.asts, mkTableType(new TS.TRecord(fields, l, false), l), ctx);
++    }
++    case 'build-column': {
++      if (!arity(2)) { return err("build-column expects 2 arguments (column name, row function)"); }
++      const lit = stringLitValue(args[0]);
++      if (schema !== undefined && lit !== undefined && schema.fields.has(lit)) {
++        return err("build-column cannot add column `" + lit + "` because it already exists in " + renderSchema(schema));
++      }
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const ctx0 = r0.outContext.addConstraint(r0.typ, tStr0(args[0].l));
++      const fn = checkRowFunction(args[1], schema, args[1].l, ctx0);
++      if (fn instanceof TCS.TypingError) { return fn; }
++      if (schema === undefined || lit === undefined) {
++        return result([r0.ast, fn.ast], TS.tTable(l), fn.ctx);
++      }
++      const fields: TypeMembers = new Map(schema.fields);
++      fields.set(lit, fn.ret);
++      return result([r0.ast, fn.ast], mkTableType(new TS.TRecord(fields, l, false), l), fn.ctx);
++    }
++    case 'add-column': {
++      if (!arity(2)) { return err("add-column expects 2 arguments (column name, list of values)"); }
++      const lit = stringLitValue(args[0]);
++      if (schema !== undefined && lit !== undefined && schema.fields.has(lit)) {
++        return err("add-column cannot add column `" + lit + "` because it already exists in " + renderSchema(schema));
++      }
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const ctx0 = r0.outContext.addConstraint(r0.typ, tStr0(args[0].l));
++      // Check the value list against List<V> to recover the element type V.
++      const v = newExistential(args[1].l, false);
++      const ctx1 = ctx0.addVariable(v);
++      const res = checking(args[1], tListApp(v), false, ctx1);
++      if (TCS.isTypingError(res)) { return res; }
++      const r1 = res as TCS.TypingResult;
++      if (schema === undefined || lit === undefined) {
++        return result([r0.ast, r1.ast], TS.tTable(l), r1.outContext);
++      }
++      const fields: TypeMembers = new Map(schema.fields);
++      fields.set(lit, v);
++      return result([r0.ast, r1.ast], mkTableType(new TS.TRecord(fields, l, false), l), r1.outContext);
++    }
++    case 'transform-column': {
++      if (!arity(2)) { return err("transform-column expects 2 arguments (column name, row function)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const s0 = synthesis(args[0], false, context);
++      if (TCS.isTypingError(s0)) { return s0; }
++      const r0 = s0 as TCS.TypingResult;
++      const ctx0 = r0.outContext.addConstraint(r0.typ, tStr0(args[0].l));
++      const fn = checkRowFunction(args[1], schema, args[1].l, ctx0);
++      if (fn instanceof TCS.TypingError) { return fn; }
++      if (schema === undefined || ca.name === undefined) {
++        return result([r0.ast, fn.ast], TS.tTable(l), fn.ctx);
++      }
++      const fields: TypeMembers = new Map();
++      for (const [k, v] of schema.fields) { fields.set(k, k === ca.name ? fn.ret : v); }
++      return result([r0.ast, fn.ast], mkTableType(new TS.TRecord(fields, l, false), l), fn.ctx);
++    }
++    case 'rename-column': {
++      if (!arity(2)) { return err("rename-column expects 2 arguments (old name, new name)"); }
++      const ca = columnArg(args[0]);
++      if (ca.err !== undefined) { return new TCS.TypingError([ca.err]); }
++      const newLit = stringLitValue(args[1]);
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      let ctx = s.ctx.addConstraint(s.typs[0], tStr0(args[0].l));
++      ctx = ctx.addConstraint(s.typs[1], tStr0(args[1].l));
++      if (schema === undefined || ca.name === undefined || newLit === undefined) {
++        return result(s.asts, TS.tTable(l), ctx);
++      }
++      const fields: TypeMembers = new Map();
++      for (const [k, v] of schema.fields) { fields.set(k === ca.name ? newLit : k, v); }
++      return result(s.asts, mkTableType(new TS.TRecord(fields, l, false), l), ctx);
++    }
++    // ---- runtime accessors emitted by table sugar; keep schema opaque ----
++    case 'multi-order':
++    case 'order-by-columns':
++    case 'select-columns':
++    case 'reduce': {
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      return result(s.asts, TS.tTable(l), s.ctx);
++    }
++    case '_column-index': {
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      return result(s.asts, TS.tNumber(l), s.ctx);
++    }
++    case '_no-column': {
++      const s = synthAll(); if (s instanceof TCS.TypingError) { return s; }
++      return result(s.asts, tTop0(l), s.ctx);
++    }
++    default: break;
++  }
++  // Not handled precisely here; let the caller use the generic method record.
++  return null;
++}
++
++// Entry point for `obj.method(args)` where obj may be a Table/Row.  Synthesizes
++// obj once, then either dispatches to table-method typing or replays the normal
++// field-access-then-apply path (so non-table receivers are unaffected).
++function synthesisDotApp(l: Loc, funDot: A.SDot, args: Expr[], topLevel: boolean, context: Context): AnyTypingResult {
++  return synthesis(funDot.obj, topLevel, context).bind((objAst, objType, ctx) => {
++    const info = tableRowInfo(objType, ctx);
++    if (info !== undefined) {
++      const precise = synthesisTableMethod(l, funDot, objAst, info, args, ctx);
++      if (precise !== null) { return precise; }
++    }
++    // Generic method application (non-table receivers, and table/row methods
++    // not modelled precisely): field access then spine.
++    return synthesisField(l, objAst, objType, funDot.field, (l2, o, f) => new A.SDot(l2, o, f), ctx)
++      .bind((_fAst, funType, ctx2) =>
++        synthesisSpine(funType, (exprs) => new A.SApp(l, funDot, exprs), args, l, ctx2));
++  });
++}
++
+ export function synthesisField(accessLoc: Loc, obj: Expr, objType: Type, fieldName: string, recreate: (l: Loc, obj: Expr, field: string) => Expr, context: Context): AnyTypingResult {
++  const tableInfo = tableRowInfo(objType, context);
++  if (tableInfo !== undefined) {
++    const tblField = synthesisTableField(accessLoc, obj, tableInfo, fieldName, recreate, context);
++    if (tblField !== undefined) { return tblField; }
++  }
+   return TCS.instantiateObjectType(objType, context).typingBind((objType2, ctx) => {
+     switch (objType2.$name) {
+       case 't-record': {
+diff --git a/lang/src/ts-compiler/src/type-defaults.ts b/lang/src/ts-compiler/src/type-defaults.ts
+index d7e1c579e..531800786 100644
+--- a/lang/src/ts-compiler/src/type-defaults.ts
++++ b/lang/src/ts-compiler/src/type-defaults.ts
+@@ -166,6 +166,21 @@ export function makeDefaultTypes(): Map<string, Type> {
+ 
+   defaultTyps.set('makeTable', tArrow([tArray(tTop), tArray(tArray(tTop))], tTable));
+ 
++  // Prims emitted by the table sugar desugarings (extend/transform/select/
++  // sieve/extract).  These are given sound, conservative types so that sugar
++  // forms type-check (to a schema-opaque `Table`) instead of erroring on an
++  // unbound primitive.  Precise, schema-aware typing is available through the
++  // table *methods* and table literals; see DESIGN.md.
++  defaultTyps.set('checkWrapTable', tArrow([tTop], tTable));
++  defaultTyps.set('open-table', tArrow([tTop], tTable));
++  defaultTyps.set('raw_array_get', tForall([tva], tArrow([tArray(tva), tNumber], tva)));
++  defaultTyps.set('raw_array_set', tForall([tva], tArrow([tArray(tva), tNumber, tva], tArray(tva))));
++  defaultTyps.set('raw_array_concat', tForall([tva], tArrow([tArray(tva), tArray(tva)], tArray(tva))));
++  defaultTyps.set('raw_array_to_list', tForall([tva], tArrow([tArray(tva)], tListApp(tva))));
++  defaultTyps.set('raw-array-map', tForall([tva, tvb], tArrow([tArrow([tva], tvb), tArray(tva)], tArray(tvb))));
++  defaultTyps.set('raw-array-map-1', tForall([tva, tvb], tArrow([tArrow([tva], tvb), tArray(tArray(tva))], tArray(tvb))));
++  defaultTyps.set('raw-array-filter', tForall([tva], tArrow([tArrow([tva], tBoolean), tArray(tva)], tArray(tva))));
++
+   return defaultTyps;
+ }
+ 
+diff --git a/lang/src/ts-compiler/src/type-structs.ts b/lang/src/ts-compiler/src/type-structs.ts
+index a95e3f0f9..653b3ee39 100644
+--- a/lang/src/ts-compiler/src/type-structs.ts
++++ b/lang/src/ts-compiler/src/type-structs.ts
+@@ -879,3 +879,4 @@ export const tArray = (v: Type, l: Loc): Type => new TApp(tArrayName.setLoc(l),
+ export const tOption = (v: Type, l: Loc): Type =>
+   new TApp(new TName(new ModuleUri('builtin://option'), new A.STypeGlobal('Option'), l, false), [v], l, false);
+ export const tTable = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Table'), l, false);
++export const tRow = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Row'), l, false);
