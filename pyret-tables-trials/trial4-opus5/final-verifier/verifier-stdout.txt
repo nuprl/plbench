@@ -1,0 +1,12 @@
+[PASS] deliverable:typecheck-example: /app/typecheck-example
+[PASS] deliverable:typed-examples: 10 example(s)
+[PASS] deliverable:DESIGN.md: /app/DESIGN.md
+[PASS] build:ts-compiler: built
+[PASS] probes:positive-accepted: 6 well-typed programs must be accepted
+[PASS] probes:negative-rejected: 8 ill-typed programs must be rejected
+[PASS] table-probes:negative-rejected: 1 table programs with schema errors must be rejected
+[PASS] examples:type-check: all 10 example(s) must type-check under the wrapper
+[PASS] examples:exercise-tables: each example must use real table operations
+[PASS] regression:ts-type-check-test: passed
+
+objective reward = 1

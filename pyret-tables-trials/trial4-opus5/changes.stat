@@ -1,0 +1,12 @@
+ lang/Makefile                                  |   9 +-
+ lang/src/arr/trove/ast.arr                     |  29 +-
+ lang/src/ts-compiler/src/ast-util.ts           |  18 +-
+ lang/src/ts-compiler/src/ast.ts                |  20 +-
+ lang/src/ts-compiler/src/compile-structs.ts    |  16 +
+ lang/src/ts-compiler/src/desugar-post-tc.ts    |  17 +
+ lang/src/ts-compiler/src/desugar.ts            | 151 +++--
+ lang/src/ts-compiler/src/flatness.ts           |   4 +
+ lang/src/ts-compiler/src/type-check-structs.ts | 367 ++++++++++++-
+ lang/src/ts-compiler/src/type-check.ts         | 733 ++++++++++++++++++++++++-
+ lang/src/ts-compiler/src/type-structs.ts       | 314 ++++++++++-
+ 11 files changed, 1616 insertions(+), 62 deletions(-)

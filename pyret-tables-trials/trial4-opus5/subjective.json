@@ -1,0 +1,30 @@
+{
+  "subjective": 0.885,
+  "criteria": {
+    "design_soundness": {
+      "score": 0.87,
+      "weight": 2.0,
+      "reasoning": "The report gives explicit, checkable subtyping rules (TABLE/ROW, SCH-CLOSED, SCH-OPEN-L/R, NAME-IN/NAME-IN-X/NAME-NEW/NAME-STR, COL-SAME/COL-OTHER) and the diff's constrainSchema/constrainColumnMembership functions implement exactly this decomposition, so the argument is grounded in code rather than assertion. Restrictions are independently justified rather than hand-waved: sort covariance is tied to cell immutability, name/order invariance is tied to distinct-name and append-only schema evolution, and the rejection of record-type schemas is argued concretely (record subtyping is width-permissive and would mis-describe column-names()/stack). Wherever a schema prefix or column name is unresolved, the design defers the constraint to the enclosing level and ultimately degrades to Any/opaque Table rather than guessing (documented in code and in DESIGN.md \u00a75), which is the right conservative behavior for a sound system. Score is not a full 1.0 because the argument is presented, not machine-verified (no metatheory or exhaustive proof), and a few solver branches (e.g. t-column vs t-column 'different schemas' using only the name, not the recorded sort, to look up the target) would need closer scrutiny to fully rule out edge-case gaps."
+    },
+    "b2t2_alignment": {
+      "score": 0.88,
+      "weight": 1.5,
+      "reasoning": "The typed examples directly recreate a wide swath of B2T2 \u00a74/\u00a75: dotProduct, the Table API (addColumn/buildColumn/getColumn/selectColumns/dropColumns/renameColumns/tsort/selectRows/update/head/vcat/addRows/empty), groupByRetentive/Subtractive, pHackingHomogeneous/Heterogeneous, and quizScoreSelect/Filter, each annotated with commentary tying the Pyret types back to the paper's stated requires/ensures clauses (e.g. Column<S,Number> as 'c in header(t) and schema(t)[c] is a number'). The report states 28 rejection tests in tests/table-types/bad/ explicitly include the paper's blackAndWhite and swappedColumns error cases, which is the right kind of coverage for 'reject the paper's error cases' \u2014 but those test files are not shown in the diff/examples given here, so this claim could not be directly verified from the material provided, which caps the score slightly."
+    },
+    "core_arr_operations": {
+      "score": 0.87,
+      "weight": 1.5,
+      "reasoning": "core-summary-stats.arr and core-table-helpers.arr adapt core.arr's mean/median/min/max/sum/iqr/r-value and distinct-colors/sort/build-column/transform-column/predict-col/find-by-id/check-integrity/stack-tables with schema-polymorphic Column<S,...> and NewColumn<S,...> signatures, and the group-by example demonstrates the column-name-as-argument pattern (core.arr's group()) with a result type Table<{C;T},{groups::Table<S>}> that genuinely depends on the passed-in column's name and sort rather than collapsing to Any. Column-appending operations (add-column, build-column, predict-col's two-column append) get precise Table<S,{newcol::T}> results, which is the substantive part of the criterion. Slightly short of full marks because 'group()' itself is only approximated via the b2t2 group-by functions rather than directly against core.arr's own group() signature, and find-by-id's honestly-Any result reduces the demonstrated precision for that one operation (though this is a defensible, disclosed limitation)."
+    },
+    "limitations_honesty": {
+      "score": 0.93,
+      "weight": 1.0,
+      "reasoning": "\u00a75 of the report is specific and falsifiable: manufactured column names -> Any, select-columns/drop/rename-column on non-literal names -> opaque Table, transform-column restricted to sort-preserving (T->T) (which matches the tableMethodType 'transform-column' case in the diff exactly), groupBySubtractive's group tables losing precision because dropping a variable-named column isn't supported, row/new-row unsupported, reduce -> Any, order-by-columns unchecked, heterogeneous unannotated columns rejected, and no cross-module-cache serialization for the new types. Every one of these claims is traceable to an actual restriction visible in the diff (e.g. tableMethodType's 'drop'/'rename-column' fallback to TS.tTable(l), the absence of any compileProvidedType change for the new constructors), so there is no evident overclaiming, and the bugs-found section is unusually candid about pre-existing issues and even a piece of dead code left unfixed."
+    },
+    "examples_quality": {
+      "score": 0.9,
+      "weight": 1.0,
+      "reasoning": "The ten example files are substantial and varied: direct B2T2 ports (dot-product, table-api, group-by, p-hacking, quiz-scores, example-tables), core.arr ports (summary-stats, table-helpers), full syntax-form coverage (table-syntax-forms), and an external-data scenario (load-table-annotations). They genuinely exercise schema-dependent typing \u2014 column reads recovering exact List<T>, build/add-column producing widened schema types, select/extract computing exact projected schemas, and group-by propagating a key column's own name/sort into the result type \u2014 rather than being trivial programs that merely happen to type-check. The one weakness is load-table-annotations.arr's use of a hand-rolled data-source stand-in instead of the real csv trove, which is disclosed as a workaround for an unrelated Any-application restriction rather than hidden, so it only mildly detracts from realism."
+    }
+  }
+}
