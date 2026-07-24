@@ -30,4 +30,4 @@ network_mode = "public"
 build_timeout_sec = 1800.0
 os = "linux"
 cpus = 4
-memory_mb = 12288
+memory_mb = 8192

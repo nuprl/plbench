@@ -248,6 +248,54 @@ def check_probes(result: Result) -> bool:
     return pos_ok and neg_ok
 
 
+def check_table_probes(result: Result) -> bool:
+    """Run the table-soundness probes through the agent's wrapper.
+
+    These differ from the design-agnostic probes above: they use Pyret's FIXED
+    table surface syntax (``table:`` literals with column annotations, the
+    ``.get-column`` method, ``select ... from``) — none of which the agent
+    designs — to check that the implementation actually tracks column schemas.
+    The negatives (reading a column absent from a statically-annotated schema, a
+    column's element type used at a wrong type, selecting a missing column) are
+    accepted by a checker that types tables as ``Any`` and rejected by any real
+    schema-tracking design, so they catch a submission that passes every other
+    objective check while doing no real table typing. (They deliberately avoid
+    table-literal cell/annotation checks, which a sound design may enforce
+    dynamically rather than statically.)
+    """
+    good = sorted((PROBES / "table-good").glob("*.arr"))
+    bad = sorted((PROBES / "table-bad").glob("*.arr"))
+    if not good or not bad:
+        raise VerifierError(f"table-probe suite missing under {PROBES}")
+
+    (PROBE_WORK / "t").mkdir(parents=True, exist_ok=True)
+
+    pos_ok = True
+    for i, src in enumerate(good):
+        dst = PROBE_WORK / "t" / f"tprog_{i:03d}_p.arr"
+        dst.write_text(src.read_text())
+        if typecheck(dst).returncode != 0:
+            pos_ok = False
+            print(f"    table probe {src.name} was rejected (should type-check)")
+    result.record(
+        "table-probes:positive-accepted", pos_ok,
+        f"{len(good)} well-typed table programs must be accepted",
+    )
+
+    neg_ok = True
+    for i, src in enumerate(bad):
+        dst = PROBE_WORK / "t" / f"tprog_{i:03d}_n.arr"
+        dst.write_text(src.read_text())
+        if typecheck(dst).returncode == 0:
+            neg_ok = False
+            print(f"    table probe {src.name} was ACCEPTED (no real table typing)")
+    result.record(
+        "table-probes:negative-rejected", neg_ok,
+        f"{len(bad)} table programs with schema errors must be rejected",
+    )
+    return pos_ok and neg_ok
+
+
 def check_examples(result: Result) -> bool:
     """Every typed example must type-check and must exercise table vocabulary."""
     examples = sorted(EXAMPLES_DIR.glob("*.arr")) if EXAMPLES_DIR.is_dir() else []
@@ -303,6 +351,7 @@ def main() -> int:
 
     if have_deliverables and built:
         check_probes(result)
+        check_table_probes(result)
         check_examples(result)
         check_regression(result)
 

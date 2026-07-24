@@ -19,7 +19,12 @@ them in the type checker, and reports on the design.
   - `test.sh` / `verifier.py` — the **objective** grader (runs in-container,
     needs no credentials); writes `/logs/verifier/reward.txt`.
   - `probes/good`, `probes/bad` — design-agnostic well-typed / ill-typed Pyret
-    programs (no table syntax) used to detect a vacuous type checker.
+    programs (no table syntax) used to detect a globally vacuous type checker.
+  - `probes/table-good`, `probes/table-bad` — table-soundness probes using
+    Pyret's fixed table surface syntax (`table:`, `.get-column`,
+    `select…from`); the negatives are accepted by a checker that types tables as
+    `Any` and rejected by any real schema-tracking design, catching a
+    submission that passes everything else while doing no real table typing.
   - `judge.toml` — the **subjective** rubric (single source of truth for the
     criteria).
   - `host_judge.py` — host-side rubric grader for credential-light VMs.
@@ -38,8 +43,10 @@ rebuilds; the pre-existing `ts-type-check-test` regression suite still passes
 (the main defense against gutting the checker — it ships must-reject programs);
 the design-agnostic probe suite behaves correctly under the agent's own
 `typecheck-example` (well-typed accepted, ill-typed rejected — catching both
-accept-everything and reject-everything wrappers); and every typed example
-type-checks and exercises real table vocabulary.
+accept-everything and reject-everything wrappers); the table-soundness probes
+are handled correctly (schema-error programs rejected — catching a checker that
+types tables as `Any`); and every typed example type-checks and exercises real
+table vocabulary.
 
 **Subjective** (`judge.toml`, LLM-as-judge): reads `DESIGN.md`, the typed
 examples, and the agent's diff, scoring design soundness, B2T2 alignment,
