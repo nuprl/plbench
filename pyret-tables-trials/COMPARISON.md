@@ -17,13 +17,14 @@ Three independent Claude Code runs on the identical hardened task (same
 |   limitations_honesty (w1) | 0.87 | 0.85 | 0.85 |
 |   examples_quality (w1) | 0.82 | 0.70 | 0.65 |
 
-(Objective note: Trials 2 and 3 first scored 0 in-container from two
-now-removed over-strict table probes — a positive probe assuming `get-column`
-element-type precision, and a `select`-missing probe. Both were verifier false
-negatives against legitimately sound designs; see "Verifier lessons" below.
-All three solutions genuinely satisfy the objective floor: real schema-tracking
-checker, the regression suite passes, and `get-column` of a column absent from
-a known schema is rejected.)
+(Objective note: all three rewards are **authoritative** — the final committed
+verifier was re-run in-container against each downloaded `/app` artifact and
+scored 1, with the `ts-type-check-test` regression genuinely passing (211
+tests); see each trial's `final-verifier/`. During development Trials 2 and 3
+first scored 0 from two now-removed over-strict table probes — a positive probe
+assuming `get-column` element-type precision, and a `select`-missing probe —
+both verifier false negatives against legitimately sound designs; see "Verifier
+lessons" below.)
 
 ## The headline: strong convergence on the core, divergence on completeness
 

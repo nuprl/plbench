@@ -2,5 +2,5 @@
   "model": "claude-opus-4-8",
   "objective": 1,
   "subjective": 0.673,
-  "objective_note": "In-container verifier scored 0 due to the select-missing table probe (tb3), a false negative against Opus sound-but-imprecise select (unknown select column typed as Any, deferred to runtime); tb3 since removed. get-column-existence probe (tb1) rejected; all other checks incl. regression passed. Corrected objective=1."
+  "objective_note": "Authoritative: final committed verifier re-run in-container against the downloaded /app artifact scored reward=1 (all checks incl. ts-type-check-test regression = 211 tests passed). See final-verifier/."
 }
