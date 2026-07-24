@@ -20,13 +20,14 @@ them in the type checker, and reports on the design.
     needs no credentials); writes `/logs/verifier/reward.txt`.
   - `probes/good`, `probes/bad` — design-agnostic well-typed / ill-typed Pyret
     programs (no table syntax) used to detect a globally vacuous type checker.
-  - `probes/table-bad` — table-soundness probes using Pyret's fixed table
-    surface syntax (`table:`, `.get-column`, `select…from`). Each reads/selects
-    a column absent from a statically known schema; a checker that types tables
-    as `Any` accepts them and any real schema-tracking design rejects them, so
-    they catch a submission that passes everything else while doing no real
-    table typing. They turn on column *existence* (not element-type precision),
-    so they don't penalize second-class/literal-only column-name designs.
+  - `probes/table-bad` — a minimal table-soundness probe using Pyret's fixed
+    table surface syntax (a `table:` literal + `.get-column`) that reads a
+    column absent from a statically known schema (B2T2's canonical wrong-column
+    error). A checker that types tables as `Any` accepts it; any real
+    schema-tracking design rejects it — so it catches a submission that passes
+    everything else while doing no real table typing. Kept deliberately minimal
+    (one `get-column`-existence probe): table typing admits many sound-but-
+    imprecise choices, so deeper table-soundness is left to the rubric + audit.
   - `judge.toml` — the **subjective** rubric (single source of truth for the
     criteria).
   - `host_judge.py` — host-side rubric grader for credential-light VMs.

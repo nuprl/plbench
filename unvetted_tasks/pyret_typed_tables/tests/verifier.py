@@ -251,23 +251,24 @@ def check_probes(result: Result) -> bool:
 def check_table_probes(result: Result) -> bool:
     """Run the table-soundness probes through the agent's wrapper.
 
-    These differ from the design-agnostic probes above: they use Pyret's FIXED
-    table surface syntax (a ``table:`` literal with column annotations, the
-    ``.get-column`` method, ``select ... from``) — none of which the agent
-    designs — to check that the implementation actually tracks column schemas.
-    Each program references a column that is *absent from a statically known
-    schema* (or reads/selects a nonexistent column). A checker that types tables
-    as ``Any`` accepts them all; any real schema-tracking design rejects them.
-    So they catch a submission that passes every other objective check while
-    doing no real table typing, and — because they turn on *column existence*
-    rather than on how precisely a column's element type is inferred — they do
-    not penalize designs that treat column names as second-class/literal-only.
+    This differs from the design-agnostic probes above: it uses Pyret's FIXED
+    table surface syntax (a ``table:`` literal with column annotations and the
+    ``.get-column`` accessor) — neither of which the agent designs — to read a
+    column that is *absent from a statically known schema*. A checker that types
+    tables as ``Any`` accepts it; any real schema-tracking design rejects it
+    (this is B2T2's canonical wrong-column error). So it catches a submission
+    that passes every other objective check while doing no real table typing.
 
-    Only negative (must-reject) probes are used here on purpose: a
-    reject-everything checker is already caught by the design-agnostic positive
-    probes and by the requirement that the agent's own typed examples
-    type-check, so a well-typed *table* probe would add no coverage while
-    risking a false negative against a legitimately imprecise design.
+    Scope is deliberately minimal — one negative probe over ``get-column``, the
+    one accessor every serious design in practice checks. Table typing admits
+    many *sound but imprecise* choices (a design may legitimately type
+    ``select`` of an unknown column, or a column's element type, as the dynamic
+    ``Any`` and defer to the runtime check), so broader table probes risk false
+    negatives against a legitimate design; deeper table-soundness assessment is
+    the job of the LLM rubric and the audit, not this gate. Only a negative
+    (must-reject) probe is used: a reject-everything checker is already caught by
+    the design-agnostic positive probes and by the requirement that the agent's
+    own typed examples type-check.
     """
     bad = sorted((PROBES / "table-bad").glob("*.arr"))
     if not bad:
