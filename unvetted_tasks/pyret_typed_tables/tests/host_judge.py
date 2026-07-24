@@ -130,9 +130,11 @@ def run_claude(prompt: str, model: str) -> dict:
     judge that cannot be scored is a grader fault, not a zero.
     """
     for attempt in (1, 2):
+        # Pass the (large) prompt on stdin, not as an argv entry: DESIGN.md +
+        # examples + diff easily exceed the OS argument-length limit.
         proc = subprocess.run(
-            ["claude", "-p", "--model", model, "--output-format", "json", prompt],
-            capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=300,
+            ["claude", "-p", "--model", model, "--output-format", "json"],
+            capture_output=True, text=True, input=prompt, timeout=300,
         )
         if proc.returncode != 0:
             last = f"claude exited {proc.returncode}: {proc.stderr.strip()[:400]}"
