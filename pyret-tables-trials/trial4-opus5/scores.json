@@ -1,6 +1,0 @@
-{
-  "model": "claude-opus-5",
-  "objective": 1,
-  "subjective": 0.885,
-  "objective_note": "Authoritative: final committed verifier re-run in-container against the downloaded /app artifact scored reward=1 (all 10 checks incl. the ts-type-check-test regression). The in-run trial also scored objective 1.0. See final-verifier/."
-}

@@ -1,8 +1,0 @@
- lang/package-lock.json                         |   3 +
- lang/src/ts-compiler/src/compile-errors.ts     |  17 +-
- lang/src/ts-compiler/src/compile-structs.ts    |   4 +-
- lang/src/ts-compiler/src/type-check-structs.ts |  97 +++++
- lang/src/ts-compiler/src/type-check.ts         | 542 +++++++++++++++++++++++++
- lang/src/ts-compiler/src/type-defaults.ts      |  15 +
- lang/src/ts-compiler/src/type-structs.ts       |   1 +
- 7 files changed, 673 insertions(+), 6 deletions(-)

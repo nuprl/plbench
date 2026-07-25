@@ -1,5 +1,0 @@
-{
-  "objective": 1,
-  "subjective": 0.731,
-  "objective_note": "Authoritative: final committed verifier re-run in-container against the downloaded /app artifact scored reward=1 (all checks incl. ts-type-check-test regression = 211 tests passed). See final-verifier/."
-}
