@@ -131,11 +131,61 @@ evidence for its conclusion. Add adversarial tests when the inspection exposes
 an important case not already covered, then rerun Harbor and repeat the
 analysis on the revised task.
 
-## View on Hub:
+## Consolidating Runs into Prototype
+
+`jobs/prototype` is the single canonical Harbor job published to the Hub. To
+add completed runs to it:
+
+1. Identify the original trial directories inside their one-run job wrappers.
+   Confirm that each trial has `config.json`, `lock.json`, `result.json`, its
+   agent trajectory, artifacts, and verifier output. Confirm the reward and
+   that the trial name does not already exist in `jobs/prototype`.
+2. Move each original trial directory directly under `jobs/prototype`. Do not
+   move an `analyze-*` trial or attach its `analysis.json` unless the user
+   explicitly asks to include the audit. Leave standalone analysis jobs intact.
+3. Normalize the live Harbor metadata for each moved trial:
+   - Set `trials_dir` in the trial `config.json` to `jobs/prototype`.
+   - Set the trial `job_id` to the ID in `jobs/prototype/result.json`.
+   - Make the same two changes in the embedded config in the trial
+     `result.json`.
+   - Rewrite `trial_uri` to the moved trial absolute
+     `file:///.../jobs/prototype/<trial-name>` path.
+4. Update the prototype job metadata. Add the source task and agent definitions
+   to `jobs/prototype/config.json` without unnecessary duplicates, and append
+   the source trial specifications from the source job `lock.json` to
+   `jobs/prototype/lock.json`.
+5. Rebuild `jobs/prototype/result.json` from every immediate child trial
+   `result.json`. Use the Harbor `TrialResult` parser and
+   `JobStats.from_trial_results(...)` rather than editing reward and token
+   totals by hand. Preserve the prototype job ID, set `n_total_trials` to the
+   number of trial directories, update the aggregate timestamps, and keep the
+   job-level `trial_results` list empty, as in the existing prototype record.
+6. Parse the prototype config, lock, job result, and every trial config/result
+   with the Harbor Pydantic models. Confirm that the directory count equals
+   `n_total_trials`, all expected trials are completed, and the new rewards
+   appear under the correct agent/model keys.
+7. Only after validation, delete the now-redundant source job wrappers. They
+   should contain only job-level `config.json`, `lock.json`, `result.json`, and
+   `job.log`; all complete trial data must already be in `jobs/prototype`.
+
+Upload the consolidated job without deleting unrelated remote files:
 
 ```bash
-hf sync jobs/prototype/ hf://buckets/arjunguha/plbench
+hf sync jobs/prototype/ hf://buckets/arjunguha/plbench --no-delete
 ```
+
+Then verify that no upload remains pending:
+
+```bash
+hf sync jobs/prototype/ hf://buckets/arjunguha/plbench \
+  --no-delete --dry-run --format agent
+```
+
+The dry-run summary should report zero uploads and zero deletes.
+
+## View on Hub
+
+The published results are in `hf://buckets/arjunguha/plbench`.
 
 
 
