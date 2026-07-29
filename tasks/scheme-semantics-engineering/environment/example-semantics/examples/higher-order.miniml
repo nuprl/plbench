@@ -1,0 +1,1 @@
+(let twice (fun f : (-> Int Int) (fun x : Int (f (f x)))) ((twice (fun n : Int (+ n 1))) 5))

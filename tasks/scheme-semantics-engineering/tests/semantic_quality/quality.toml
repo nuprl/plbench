@@ -1,0 +1,46 @@
+[judge]
+judge = "codex"
+model = "gpt-5.6-luna"
+timeout = 900
+files = [
+  "/tmp/scheme-semantics-submission.txt",
+  "/app/SemanticsTemplate.lean",
+  "/app/MiniScheme.md",
+  "/example/Semantics.lean",
+  "/app/minischeme-reference/ast.ml",
+  "/app/minischeme-reference/checker.ml",
+  "/app/minischeme-reference/interp.ml",
+]
+
+[[criterion]]
+name = "independent_declarative_static_semantics"
+description = "Inspect the complete submitted Lean source bundle. Does the Development's WellFormed field denote an independent Prop-valued static judgment, either inductive itself or defined directly from independently inductive typing or well-formedness judgments? It must state the language's syntax, binder validity, and lexical/global scope rules rather than define validity as parser/checker/interpreter success, reachability, normalization, or a Boolean/executable decision procedure. The supplied worked example illustrates the required declarative architecture."
+type = "binary"
+
+[[criterion]]
+name = "independent_inductive_small_step"
+description = "Is the Development's Step field an independently defined inductive, Prop-valued one-step relation over State, with constructors that directly and recognizably express the language's individual operational rules? Answer no if it is big-step evaluation, reflexive-transitive closure, an interpreter trace, an equation about interpret or another complete executable evaluator, or a catch-all relation added merely to make proofs easy. Step need not be deterministic."
+type = "binary"
+
+[[criterion]]
+name = "meaningful_well_formedness_and_metatheory"
+description = "Does WellFormed genuinely exclude ill-formed or ill-typed initial and intermediate states, and do initialWellFormed, progress, and preservation substantively establish the intended static-safety boundary? Answer no for True, reachability from initial states, interpreter success, or definitions that accept malformed representable machine configurations and make the theorems vacuous."
+type = "binary"
+
+[[criterion]]
+name = "paper_semantics_quality"
+description = "After hiding parse and interpret, do the inductive static judgments and Step still form a readable, rule-by-rule paper semantics for the supplied language? Reject unexplained fallback transitions, artificial stuttering or short cycles, generic state repair/normalization used to force well-formedness, fixture recognition, and hard-coded held-out outcomes. Ordinary semantic helper definitions such as lookup, substitution, allocation, primitive operations, and evaluation contexts are permitted."
+type = "binary"
+
+[[criterion]]
+name = "interpreter_correspondence"
+description = "Is interpret a general pure state-passing, fuel-bounded interpreter, and do the bundled soundness and completeness proofs genuinely connect its results to the independently defined small-step relation and observe? A directly recursive big-step-style interpreter is permitted; it need not expose a one-transition executable function. Answer no if Step or WellFormed is derived from interpret, if the interpreter recognizes fixtures, if none represents ordinary terminal failure rather than insufficient fuel, or if the proofs become true only because the declarative relations restate executable evaluation."
+type = "binary"
+
+[[criterion]]
+name = "faithful_language_model"
+description = "Taken together, do parse, initial, WellFormed, Step, observe, and interpret model the supplied Mini-Scheme implementation faithfully: parse/static rejection follows the supplied checker, dynamically failing but statically accepted programs remain semantic executions, and the state-passed observation is exactly standard output? Answer no if unsupported semantic cases are hidden as static rejection, stuckness, arbitrary transitions, or fuel exhaustion."
+type = "binary"
+
+[scoring]
+aggregation = "all_pass"
