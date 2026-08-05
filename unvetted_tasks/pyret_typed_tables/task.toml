@@ -1,0 +1,33 @@
+schema_version = "1.3"
+artifacts = []
+
+[task]
+name = "plbench/pyret-typed-tables"
+description = "Design and implement sound static type checking for tables in the Pyret TypeScript compiler"
+keywords = ["programming-languages", "type-systems", "tables", "language-design"]
+[[task.authors]]
+name = "Arjun Guha"
+email = "a.guha@northeastern.edu"
+
+[metadata]
+category = "programming-languages"
+difficulty = "hard"
+
+[verifier]
+# Generous: the objective verifier runs the full `ts-type-check-test`
+# regression suite (rebuilds the TS type-check harness and type-checks/runs
+# ~160 programs single-threaded, ~45 min on the baseline), plus the agent's
+# examples and the probe suite.
+timeout_sec = 5400.0
+
+[agent]
+# This is a large, open-ended design task; the reference run was one of the
+# largest single-context sessions we have recorded.
+timeout_sec = 14400.0
+
+[environment]
+network_mode = "public"
+build_timeout_sec = 1800.0
+os = "linux"
+cpus = 4
+memory_mb = 8192
